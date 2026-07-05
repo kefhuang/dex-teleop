@@ -48,14 +48,19 @@ def axis_mapping(
 
 def apply_deadzone(vector: np.ndarray, threshold: float) -> np.ndarray:
     """Return a copy with components of absolute value <= threshold zeroed."""
+    limit = float(threshold)
+    if limit < 0.0:
+        raise ValueError("threshold must be >= 0.0")
     values = np.asarray(vector, dtype=float).copy()
-    values[np.abs(values) <= float(threshold)] = 0.0
+    values[np.abs(values) <= limit] = 0.0
     return values
 
 
 def limit_components(vector: np.ndarray, max_abs: float) -> np.ndarray:
     """Clamp each component to ``[-max_abs, max_abs]``."""
     limit = float(max_abs)
+    if limit < 0.0:
+        raise ValueError("max_abs must be >= 0.0")
     return np.clip(np.asarray(vector, dtype=float), -limit, limit)
 
 
@@ -64,6 +69,8 @@ def clamp_vector_norm(vector: np.ndarray, max_norm: float) -> np.ndarray:
     values = np.asarray(vector, dtype=float)
     norm = float(np.linalg.norm(values))
     limit = float(max_norm)
+    if limit < 0.0:
+        raise ValueError("max_norm must be >= 0.0")
     if norm == 0.0 or norm <= limit:
         return values.copy()
     return values * (limit / norm)

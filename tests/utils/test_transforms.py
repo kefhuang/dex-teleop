@@ -79,16 +79,31 @@ def test_apply_deadzone_zeroes_small_components():
     assert np.allclose(result, np.array([0.0, 0.0, 0.2]))
 
 
+def test_apply_deadzone_rejects_negative_threshold():
+    with pytest.raises(ValueError, match="threshold must be >= 0.0"):
+        apply_deadzone(np.array([0.1, -0.1]), threshold=-0.01)
+
+
 def test_limit_components_clamps_each_component():
     result = limit_components(np.array([0.2, -0.2, 0.03]), max_abs=0.05)
 
     assert np.allclose(result, np.array([0.05, -0.05, 0.03]))
 
 
+def test_limit_components_rejects_negative_max_abs():
+    with pytest.raises(ValueError, match="max_abs must be >= 0.0"):
+        limit_components(np.array([0.1, -0.1]), max_abs=-0.05)
+
+
 def test_clamp_vector_norm_preserves_direction():
     result = clamp_vector_norm(np.array([3.0, 4.0, 0.0]), max_norm=1.0)
 
     assert np.allclose(result, np.array([0.6, 0.8, 0.0]))
+
+
+def test_clamp_vector_norm_rejects_negative_max_norm():
+    with pytest.raises(ValueError, match="max_norm must be >= 0.0"):
+        clamp_vector_norm(np.array([3.0, 4.0, 0.0]), max_norm=-1.0)
 
 
 def test_quaternion_delta_rpy_identity_is_zero():
