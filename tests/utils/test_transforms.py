@@ -35,6 +35,44 @@ def test_axis_mapping_rejects_unknown_axis():
         )
 
 
+def test_axis_mapping_rejects_invalid_vector_shape():
+    with pytest.raises(ValueError, match="vector must have shape"):
+        axis_mapping(
+            vector=np.zeros(2),
+            mapping={"x": "+x", "y": "+y", "z": "+z"},
+            output_axes=("x", "y", "z"),
+            input_axes=("x", "y", "z"),
+        )
+
+
+def test_axis_mapping_rejects_missing_output_axis_mapping():
+    with pytest.raises(ValueError, match="Missing mapping"):
+        axis_mapping(
+            vector=np.zeros(3),
+            mapping={"x": "+x", "z": "+z"},
+            output_axes=("x", "y", "z"),
+            input_axes=("x", "y", "z"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("axis_spec", "message"),
+    [
+        ("", "Axis mapping value cannot be empty"),
+        ("+", "Invalid axis mapping value"),
+        ("-", "Invalid axis mapping value"),
+    ],
+)
+def test_axis_mapping_rejects_invalid_signed_axis_specs(axis_spec, message):
+    with pytest.raises(ValueError, match=message):
+        axis_mapping(
+            vector=np.zeros(3),
+            mapping={"x": axis_spec, "y": "+y", "z": "+z"},
+            output_axes=("x", "y", "z"),
+            input_axes=("x", "y", "z"),
+        )
+
+
 def test_apply_deadzone_zeroes_small_components():
     result = apply_deadzone(np.array([0.001, -0.01, 0.2]), threshold=0.01)
 
