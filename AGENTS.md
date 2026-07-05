@@ -24,6 +24,7 @@ Do not recreate the environment unless explicitly requested. Install any additio
 
 ## Environment changes
 
+- 2026-07-06: Installed `pytest` into the existing `dex-teleop` conda environment for repository test execution.
 - 2026-07-05: Installed `dependency/oculus_reader/requirements.txt` into the existing `dex-teleop` conda environment for Oculus Reader diagnostics: `numpy`, `pure-python-adb`, and `pyyaml`.
 - 2026-07-05: Installed deoxys Python diagnostic dependencies into the existing `dex-teleop` conda environment: `easydict`, `termcolor`, `simplejson`, `pyzmq`, `protobuf`, `grpcio-tools`, and `pybullet`.
 - 2026-07-05: Generated deoxys Python protobuf modules from `dependency/deoxys_control/deoxys/proto/franka-interface/*.proto` into `dependency/deoxys_control/deoxys/deoxys/proto/franka_interface/` for `FrankaInterface` import/read diagnostics.
