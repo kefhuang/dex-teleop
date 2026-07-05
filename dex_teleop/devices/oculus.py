@@ -78,20 +78,58 @@ class OculusDevice:
 
     def _pose_from_matrix(self, matrix: Any) -> Pose:
         arr = np.asarray(matrix, dtype=float)
+        orientation = np.array([0.0, 0.0, 0.0, 1.0])
         if arr.shape == (4, 4):
             position = arr[:3, 3]
+            orientation = self._quaternion_xyzw_from_rotation(arr[:3, :3])
         elif arr.shape == (3,):
             position = arr
         else:
             position = np.zeros(3)
-        return Pose(position=position, orientation=[0.0, 0.0, 0.0, 1.0])
+        return Pose(position=position, orientation=orientation)
+
+    def _quaternion_xyzw_from_rotation(self, rotation: Any) -> np.ndarray:
+        rot = np.asarray(rotation, dtype=float)
+        trace = float(np.trace(rot))
+        if trace > 0.0:
+            scale = 2.0 * np.sqrt(trace + 1.0)
+            w = 0.25 * scale
+            x = (rot[2, 1] - rot[1, 2]) / scale
+            y = (rot[0, 2] - rot[2, 0]) / scale
+            z = (rot[1, 0] - rot[0, 1]) / scale
+        elif rot[0, 0] > rot[1, 1] and rot[0, 0] > rot[2, 2]:
+            scale = 2.0 * np.sqrt(1.0 + rot[0, 0] - rot[1, 1] - rot[2, 2])
+            w = (rot[2, 1] - rot[1, 2]) / scale
+            x = 0.25 * scale
+            y = (rot[0, 1] + rot[1, 0]) / scale
+            z = (rot[0, 2] + rot[2, 0]) / scale
+        elif rot[1, 1] > rot[2, 2]:
+            scale = 2.0 * np.sqrt(1.0 + rot[1, 1] - rot[0, 0] - rot[2, 2])
+            w = (rot[0, 2] - rot[2, 0]) / scale
+            x = (rot[0, 1] + rot[1, 0]) / scale
+            y = 0.25 * scale
+            z = (rot[1, 2] + rot[2, 1]) / scale
+        else:
+            scale = 2.0 * np.sqrt(1.0 + rot[2, 2] - rot[0, 0] - rot[1, 1])
+            w = (rot[1, 0] - rot[0, 1]) / scale
+            x = (rot[0, 2] + rot[2, 0]) / scale
+            y = (rot[1, 2] + rot[2, 1]) / scale
+            z = 0.25 * scale
+
+        quat = np.array([x, y, z, w], dtype=float)
+        norm = np.linalg.norm(quat)
+        if norm == 0.0:
+            return np.array([0.0, 0.0, 0.0, 1.0])
+        return quat / norm
 
     def _button_bool(self, buttons: dict[str, Any], side: str, name: str) -> bool:
         for candidate in self._button_candidates(side, name):
             if candidate in buttons:
                 value = buttons[candidate]
                 if isinstance(value, tuple):
-                    return bool(value[0]) if value else False
+                    value = value[0] if value else 0.0
+                if name == "grip" and isinstance(value, (int, float, np.integer, np.floating)):
+                    return float(value) >= 0.5
                 return bool(value)
         return False
 
@@ -114,6 +152,15 @@ class OculusDevice:
             oculus_names = ["Trig", "Tr"]
         else:
             oculus_names = [name]
+        if name == "grip":
+            return [
+                f"{oculus_initial}{oculus_names[-1]}",
+                f"{side}_{name}",
+                f"{side_initial}_{name}",
+                f"{side}{name}",
+                f"{oculus_side}{oculus_names[0]}",
+                name,
+            ]
         return [
             f"{side}_{name}",
             f"{side_initial}_{name}",
