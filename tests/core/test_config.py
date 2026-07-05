@@ -134,6 +134,59 @@ def test_unknown_gripper_arm_reference_reports_gripper_path(tmp_path: Path):
         load_config(path)
 
 
+def test_mismatched_reciprocal_arm_gripper_ownership_reports_paths(tmp_path: Path):
+    path = tmp_path / "bad.yml"
+    path.write_text(
+        """
+app:
+  rate_hz: 30
+  dry_run: true
+input:
+  type: oculus
+  mock_controller: true
+controls:
+  clutch_button: grip
+  gripper_axis: trigger
+arms:
+  left:
+    type: franka
+    interface_cfg: dependency/deoxys_control/deoxys/config/franka-two.yml
+    controller: left
+    gripper: left_gripper
+  right:
+    type: franka
+    interface_cfg: dependency/deoxys_control/deoxys/config/franka-two.yml
+    controller: right
+    gripper: right_gripper
+grippers:
+  left_gripper:
+    type: franka
+    arm: right
+  right_gripper:
+    type: franka
+    arm: left
+mapping:
+  position_axes: {x: '+x', y: '+y', z: '+z'}
+  rotation_axes: {roll: '+roll', pitch: '+pitch', yaw: '+yaw'}
+scales:
+  position: 1.0
+  rotation: 1.0
+safety:
+  max_translation_per_cycle: 0.01
+  max_rotation_per_cycle: 0.05
+  position_deadzone: 0.002
+  rotation_deadzone: 0.01
+  send_zero_when_idle: true
+""".strip()
+    )
+
+    with pytest.raises(
+        ConfigError,
+        match=r"arms\.left\.gripper.*left_gripper.*grippers\.left_gripper\.arm.*right.*left",
+    ):
+        load_config(path)
+
+
 def test_non_mapping_yaml_root_raises_config_error(tmp_path: Path):
     path = tmp_path / "bad.yml"
     path.write_text("- app\n- input\n")

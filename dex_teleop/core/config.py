@@ -101,6 +101,19 @@ def _validate(cfg: dict[str, Any]) -> None:
                 f"{gripper_path}.arm references unknown arm {arm_id!r}"
             )
 
+    for arm_id, arm_cfg_value in arms.items():
+        arm_path = f"arms.{arm_id}"
+        arm_cfg = _require_mapping(arm_cfg_value, arm_path)
+        gripper_id = arm_cfg["gripper"]
+        gripper_path = f"grippers.{gripper_id}"
+        gripper_cfg = _require_mapping(grippers[gripper_id], gripper_path)
+        gripper_arm_id = gripper_cfg["arm"]
+        if gripper_arm_id != arm_id:
+            raise ConfigError(
+                f"{arm_path}.gripper references {gripper_id!r}, but "
+                f"{gripper_path}.arm references {gripper_arm_id!r}; expected {arm_id!r}"
+            )
+
 
 def load_config(path: str | Path) -> dict[str, Any]:
     """Load and validate a teleoperation YAML config file."""
