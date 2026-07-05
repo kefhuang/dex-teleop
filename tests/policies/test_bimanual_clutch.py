@@ -116,6 +116,28 @@ def test_held_grip_outputs_mapped_scaled_limited_delta_from_anchor():
 
 
 
+def test_held_grip_uses_anchor_snapshot_when_controller_pose_mutates_in_place():
+    policy = _policy()
+    pose = Pose(
+        position=np.array([0.0, 0.0, 0.0]),
+        orientation=np.array([0.0, 0.0, 0.0, 1.0]),
+    )
+    controller = ControllerState(
+        name="left",
+        pose=pose,
+        buttons={"grip": True},
+        axes={"trigger": 0.0},
+    )
+    state = DeviceState(timestamp=1.0, controllers={"left": controller})
+    policy.update(state)
+
+    pose.position[:] = np.array([0.2, 0.3, 0.4])
+    batch = policy.update(state)
+
+    assert batch.motions["left"].enabled is True
+    assert np.allclose(batch.motions["left"].delta_position, np.array([0.01, -0.01, 0.01]))
+
+
 def test_left_and_right_clutch_anchors_are_independent():
     policy = _policy()
     policy.update(

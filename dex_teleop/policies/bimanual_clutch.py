@@ -26,6 +26,13 @@ class _ArmClutchState:
     anchor_pose: Pose | None = None
 
 
+def _snapshot_pose(pose: Pose) -> Pose:
+    return Pose(
+        position=pose.position.copy(),
+        orientation=pose.orientation.copy(),
+    )
+
+
 class BimanualClutchPolicy:
     def __init__(
         self,
@@ -109,7 +116,7 @@ class BimanualClutchPolicy:
             if not clutch_state.active or clutch_state.anchor_pose is None:
                 self._states[arm_id] = _ArmClutchState(
                     active=True,
-                    anchor_pose=controller.pose,
+                    anchor_pose=_snapshot_pose(controller.pose),
                 )
                 motions[arm_id] = MotionCommand(
                     arm_id=arm_id,
