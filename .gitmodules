@@ -1,0 +1,6 @@
+[submodule "dependency/deoxys_control"]
+	path = dependency/deoxys_control
+	url = git@github.com:kefhuang/deoxys_control.git
+[submodule "dependency/oculus_reader"]
+	path = dependency/oculus_reader
+	url = https://github.com/rail-berkeley/oculus_reader.git
