@@ -1,0 +1,4 @@
+interface:
+  display_name: "Quest Teleop"
+  short_description: "Use Quest 3 with ADB and Oculus Reader for dex-teleop."
+  default_prompt: "Help me connect Quest 3 and verify Oculus Reader teleoperation input."
