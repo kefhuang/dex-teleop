@@ -187,6 +187,26 @@ safety:
         load_config(path)
 
 
+def test_extra_gripper_claiming_arm_with_different_gripper_is_rejected(tmp_path: Path):
+    path = tmp_path / "bad.yml"
+    path.write_text(
+        _VALID_CONFIG.replace(
+            "mapping:",
+            """
+  extra_gripper:
+    type: franka
+    arm: left
+mapping:""",
+        )
+    )
+
+    with pytest.raises(
+        ConfigError,
+        match=r"grippers\.extra_gripper\.arm.*left.*arms\.left\.gripper.*left_gripper.*extra_gripper",
+    ):
+        load_config(path)
+
+
 def test_non_mapping_yaml_root_raises_config_error(tmp_path: Path):
     path = tmp_path / "bad.yml"
     path.write_text("- app\n- input\n")
