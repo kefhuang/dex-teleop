@@ -23,7 +23,7 @@ from dex_teleop.utils.transforms import (
 @dataclass
 class _ArmClutchState:
     active: bool = False
-    anchor_pose: Pose | None = None
+    previous_pose: Pose | None = None
 
 
 def _snapshot_pose(pose: Pose) -> Pose:
@@ -113,10 +113,10 @@ class BimanualClutchPolicy:
                 motions[arm_id] = MotionCommand.disabled(arm_id)
                 continue
 
-            if not clutch_state.active or clutch_state.anchor_pose is None:
+            if not clutch_state.active or clutch_state.previous_pose is None:
                 self._states[arm_id] = _ArmClutchState(
                     active=True,
-                    anchor_pose=_snapshot_pose(controller.pose),
+                    previous_pose=_snapshot_pose(controller.pose),
                 )
                 motions[arm_id] = MotionCommand(
                     arm_id=arm_id,
@@ -126,9 +126,9 @@ class BimanualClutchPolicy:
                 )
                 continue
 
-            raw_position_delta = controller.pose.position - clutch_state.anchor_pose.position
+            raw_position_delta = controller.pose.position - clutch_state.previous_pose.position
             raw_rotation_delta = quaternion_delta_rpy(
-                clutch_state.anchor_pose.orientation,
+                clutch_state.previous_pose.orientation,
                 controller.pose.orientation,
             )
             mapped_position = axis_mapping(
@@ -157,6 +157,10 @@ class BimanualClutchPolicy:
                 delta_position=delta_position,
                 delta_rotation=delta_rotation,
                 enabled=True,
+            )
+            self._states[arm_id] = _ArmClutchState(
+                active=True,
+                previous_pose=_snapshot_pose(controller.pose),
             )
 
         return TeleopCommandBatch(motions=motions, grippers=grippers)

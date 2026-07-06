@@ -97,7 +97,7 @@ def test_grip_released_emits_disabled_motion_and_gripper_command_from_trigger():
     assert batch.grippers["left_gripper"].normalized == 0.25
 
 
-def test_first_grip_press_establishes_anchor_and_emits_enabled_zero_delta():
+def test_first_grip_press_establishes_previous_pose_and_emits_enabled_zero_delta():
     batch = _policy().update(_state(left_pos=(1.0, 2.0, 3.0), left_grip=True))
 
     assert batch.motions["left"].enabled is True
@@ -105,7 +105,7 @@ def test_first_grip_press_establishes_anchor_and_emits_enabled_zero_delta():
     assert np.allclose(batch.motions["left"].delta_rotation, np.zeros(3))
 
 
-def test_held_grip_outputs_mapped_scaled_limited_delta_from_anchor():
+def test_held_grip_outputs_mapped_scaled_limited_incremental_delta():
     policy = _policy()
     policy.update(_state(left_pos=(0.0, 0.0, 0.0), left_grip=True))
 
@@ -115,8 +115,23 @@ def test_held_grip_outputs_mapped_scaled_limited_delta_from_anchor():
     assert np.allclose(batch.motions["left"].delta_position, np.array([0.01, -0.01, 0.01]))
 
 
+def test_held_grip_outputs_motion_once_for_repeated_controller_pose():
+    policy = _policy()
+    policy.update(_state(left_pos=(0.0, 0.0, 0.0), left_grip=True))
 
-def test_held_grip_uses_anchor_snapshot_when_controller_pose_mutates_in_place():
+    first_at_pose = policy.update(_state(left_pos=(0.2, 0.3, 0.4), left_grip=True))
+    second_at_same_pose = policy.update(_state(left_pos=(0.2, 0.3, 0.4), left_grip=True))
+
+    assert np.allclose(
+        first_at_pose.motions["left"].delta_position,
+        np.array([0.01, -0.01, 0.01]),
+    )
+    assert second_at_same_pose.motions["left"].enabled is True
+    assert np.allclose(second_at_same_pose.motions["left"].delta_position, np.zeros(3))
+    assert np.allclose(second_at_same_pose.motions["left"].delta_rotation, np.zeros(3))
+
+
+def test_held_grip_uses_previous_pose_snapshot_when_controller_pose_mutates_in_place():
     policy = _policy()
     pose = Pose(
         position=np.array([0.0, 0.0, 0.0]),
@@ -138,7 +153,7 @@ def test_held_grip_uses_anchor_snapshot_when_controller_pose_mutates_in_place():
     assert np.allclose(batch.motions["left"].delta_position, np.array([0.01, -0.01, 0.01]))
 
 
-def test_left_and_right_clutch_anchors_are_independent():
+def test_left_and_right_clutch_previous_poses_are_independent():
     policy = _policy()
     policy.update(
         _state(
@@ -238,7 +253,7 @@ def test_position_deadzone_zeroes_small_position_delta_after_mapping_and_scale()
     assert np.allclose(batch.motions["left"].delta_position, np.zeros(3))
 
 
-def test_grip_release_clears_anchor_and_disables_motion():
+def test_grip_release_clears_previous_pose_and_disables_motion():
     policy = _policy()
     policy.update(_state(left_pos=(0.0, 0.0, 0.0), left_grip=True))
     policy.update(_state(left_pos=(0.2, 0.3, 0.4), left_grip=False))
