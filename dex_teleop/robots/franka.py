@@ -12,6 +12,27 @@ from dex_teleop.core.types import ArmState, GripperCommand, MotionCommand, Pose
 _CONTROLLER_TYPE = "OSC_POSE"
 _ZERO_ACTION = [0.0] * 7
 
+
+def _send_no_control(interface: Any) -> None:
+    """Send a Deoxys NO_CONTROL keepalive without running OSC nullspace torque."""
+
+    if hasattr(interface, "send_no_control"):
+        interface.send_no_control()
+        return
+
+    _ensure_deoxys_on_path()
+    from deoxys.proto.franka_interface import franka_controller_pb2
+
+    dummy_msg = franka_controller_pb2.FrankaDummyControllerMessage()
+    control_msg = franka_controller_pb2.FrankaControlMessage()
+    control_msg.controller_type = (
+        franka_controller_pb2.FrankaControlMessage.ControllerType.NO_CONTROL
+    )
+    control_msg.control_msg.Pack(dummy_msg)
+    control_msg.timeout = 0.2
+    control_msg.termination = False
+    interface._publisher.send(control_msg.SerializeToString())
+
 # Deoxys' generated protobuf modules require the pure-Python protobuf runtime in
 # this repository's environment. Keep this as a default so callers may override
 # it explicitly before import if needed.
@@ -92,10 +113,13 @@ class FrankaArmController:
 
     def stop_motion(self) -> None:
         # Deoxys C++ treats termination=True as a request to terminate the
-        # franka-interface process, not just to stop the current arm motion.
-        # Use a zero OSC delta as a hold/keepalive command so releasing the
-        # clutch does not kill the backend.
-        self._control(list(_ZERO_ACTION), termination=False)
+        # franka-interface process. Do not send OSC zero here either: the OSC
+        # controller applies nullspace posture torques even with zero Cartesian
+        # delta, so the arm can move while the clutch is released. NO_CONTROL
+        # is the safe idle/keepalive command.
+        if self.interface is None:
+            raise RuntimeError("FrankaArmController must be connected before use")
+        _send_no_control(self.interface)
 
     def close(self) -> None:
         if self._owns_interface and self.interface is not None:

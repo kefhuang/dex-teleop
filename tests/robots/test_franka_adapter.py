@@ -12,6 +12,10 @@ class FakeFrankaInterface:
         self.control_calls = []
         self.gripper_calls = []
         self.closed = False
+        self.no_control_calls = 0
+
+    def send_no_control(self):
+        self.no_control_calls += 1
 
     def control(self, controller_type, action, controller_cfg=None, termination=False):
         self.control_calls.append((controller_type, list(action), controller_cfg, termination))
@@ -43,12 +47,8 @@ def test_franka_arm_stop_sends_zero_hold_action():
     arm.connect()
     arm.stop_motion()
 
-    assert fake.control_calls[-1] == (
-        "OSC_POSE",
-        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        {},
-        False,
-    )
+    assert fake.no_control_calls == 1
+    assert fake.control_calls == []
 
 
 def test_franka_arm_disabled_motion_sends_zero_hold_action():
@@ -57,12 +57,8 @@ def test_franka_arm_disabled_motion_sends_zero_hold_action():
     arm.connect()
     arm.send_motion(MotionCommand.disabled("left"))
 
-    assert fake.control_calls[-1] == (
-        "OSC_POSE",
-        [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-        {},
-        False,
-    )
+    assert fake.no_control_calls == 1
+    assert fake.control_calls == []
 
 
 def test_franka_arm_close_marks_injected_interface_closed_without_closing_interface():
