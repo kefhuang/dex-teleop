@@ -4,6 +4,7 @@ import sys
 import types
 
 import numpy as np
+import pytest
 
 from dex_teleop.core.types import GripperCommand, MotionCommand
 from dex_teleop.robots.franka import FrankaArmController, FrankaGripperController
@@ -61,6 +62,77 @@ def test_franka_arm_get_state_returns_identity_when_no_eef_pose_available():
 def test_franka_arm_get_state_returns_identity_for_zero_eef_pose():
     fake = FakeFrankaInterface()
     fake.last_eef_pose = np.zeros((4, 4))
+    arm = FrankaArmController("left", interface_cfg="unused.yml", interface=fake, controller_cfg={})
+
+    state = arm.get_state()
+
+    np.testing.assert_allclose(state.pose.position, [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(state.pose.orientation, [0.0, 0.0, 0.0, 1.0])
+
+
+@pytest.mark.parametrize(
+    "invalid_pose",
+    [
+        pytest.param(
+            np.array(
+                [
+                    [1.0, 0.0, 0.0, np.nan],
+                    [0.0, 1.0, 0.0, -0.2],
+                    [0.0, 0.0, 1.0, 0.3],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            ),
+            id="nan_pose_value",
+        ),
+        pytest.param(
+            np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.4],
+                    [0.0, 1.0, 0.0, np.inf],
+                    [0.0, 0.0, 1.0, 0.3],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            ),
+            id="inf_pose_value",
+        ),
+        pytest.param(
+            np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.4],
+                    [0.0, 1.0, 0.0, -0.2],
+                    [0.0, 0.0, 1.0, 0.3],
+                    [0.0, 0.0, 0.0, 0.0],
+                ]
+            ),
+            id="invalid_homogeneous_bottom_row",
+        ),
+        pytest.param(
+            np.array(
+                [
+                    [2.0, 0.0, 0.0, 0.4],
+                    [0.0, 1.0, 0.0, -0.2],
+                    [0.0, 0.0, 1.0, 0.3],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            ),
+            id="non_orthonormal_rotation",
+        ),
+        pytest.param(
+            np.array(
+                [
+                    [1.0, 0.0, 0.0, 0.4],
+                    [0.0, 1.0, 0.0, -0.2],
+                    [0.0, 0.0, -1.0, 0.3],
+                    [0.0, 0.0, 0.0, 1.0],
+                ]
+            ),
+            id="reflection_determinant_negative_one",
+        ),
+    ],
+)
+def test_franka_arm_get_state_returns_identity_for_invalid_eef_pose(invalid_pose):
+    fake = FakeFrankaInterface()
+    fake.last_eef_pose = invalid_pose
     arm = FrankaArmController("left", interface_cfg="unused.yml", interface=fake, controller_cfg={})
 
     state = arm.get_state()
