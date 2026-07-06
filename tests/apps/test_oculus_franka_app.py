@@ -45,7 +45,7 @@ def test_app_missing_config_returns_config_error(capsys):
     assert "Config error" in captured.out
 
 
-def test_repeated_disabled_motion_stops_only_during_cleanup(monkeypatch):
+def test_repeated_disabled_motion_sends_zero_keepalive_when_configured(monkeypatch):
     class FakeDevice:
         def __init__(self) -> None:
             self.reads = 0
@@ -93,6 +93,7 @@ def test_repeated_disabled_motion_stops_only_during_cleanup(monkeypatch):
         "input": {"mock_controller": True},
         "arms": {"left": {}},
         "grippers": {},
+        "safety": {"send_zero_when_idle": True},
     }
     monkeypatch.setattr(oculus_franka, "_make_device", lambda cfg: FakeDevice())
     monkeypatch.setattr(oculus_franka, "_make_arms", lambda cfg: {"left": arm})
@@ -102,7 +103,7 @@ def test_repeated_disabled_motion_stops_only_during_cleanup(monkeypatch):
     assert oculus_franka.run(cfg) == 0
 
     assert arm.sent_commands == []
-    assert arm.stop_count == 1
+    assert arm.stop_count == 4
 
 
 def test_run_ignores_gripper_command_for_unconfigured_gripper(monkeypatch):

@@ -189,6 +189,8 @@ def run(cfg: dict[str, Any], duration: float | None = None, *, print_commands: b
     rate = RateLimiter(float(cfg["app"]["rate_hz"]))
     deadline = None if duration is None else time.monotonic() + float(duration)
 
+    send_zero_when_idle = bool(cfg.get("safety", {}).get("send_zero_when_idle", False))
+
     print(
         f"Starting teleop dry_run={cfg['app']['dry_run']} "
         f"mock_controller={cfg['input']['mock_controller']}"
@@ -246,9 +248,9 @@ def run(cfg: dict[str, Any], duration: float | None = None, *, print_commands: b
                     arm.send_motion(command)
                     arm_moving[arm_id] = True
                 else:
-                    if arm_moving.get(arm_id, False):
+                    if send_zero_when_idle or arm_moving.get(arm_id, False):
                         arm.stop_motion()
-                        arm_moving[arm_id] = False
+                    arm_moving[arm_id] = False
             for gripper_id, command in batch.grippers.items():
                 gripper = grippers.get(gripper_id)
                 if gripper is not None:

@@ -176,11 +176,13 @@ def move_toward_target(
 
 
 def stop_robot(robot: Any, controller_cfg: Any) -> None:
+    # Do not use termination=True: Deoxys C++ interprets it as terminating the
+    # franka-interface backend process. A zero OSC delta safely holds position.
     robot.control(
         controller_type=CONTROLLER_TYPE,
         action=[0.0] * 7,
         controller_cfg=controller_cfg,
-        termination=True,
+        termination=False,
     )
 
 

@@ -37,7 +37,7 @@ def test_franka_arm_sends_osc_pose_action_with_neutral_gripper_slot():
     )
 
 
-def test_franka_arm_stop_sends_zero_termination_action():
+def test_franka_arm_stop_sends_zero_hold_action():
     fake = FakeFrankaInterface()
     arm = FrankaArmController("left", interface_cfg="unused.yml", interface=fake, controller_cfg={})
     arm.connect()
@@ -47,11 +47,11 @@ def test_franka_arm_stop_sends_zero_termination_action():
         "OSC_POSE",
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         {},
-        True,
+        False,
     )
 
 
-def test_franka_arm_disabled_motion_sends_zero_termination_action():
+def test_franka_arm_disabled_motion_sends_zero_hold_action():
     fake = FakeFrankaInterface()
     arm = FrankaArmController("left", interface_cfg="unused.yml", interface=fake, controller_cfg={})
     arm.connect()
@@ -61,7 +61,7 @@ def test_franka_arm_disabled_motion_sends_zero_termination_action():
         "OSC_POSE",
         [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         {},
-        True,
+        False,
     )
 
 

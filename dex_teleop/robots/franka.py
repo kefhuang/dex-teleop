@@ -91,7 +91,11 @@ class FrankaArmController:
         self._control(action, termination=False)
 
     def stop_motion(self) -> None:
-        self._control(list(_ZERO_ACTION), termination=True)
+        # Deoxys C++ treats termination=True as a request to terminate the
+        # franka-interface process, not just to stop the current arm motion.
+        # Use a zero OSC delta as a hold/keepalive command so releasing the
+        # clutch does not kill the backend.
+        self._control(list(_ZERO_ACTION), termination=False)
 
     def close(self) -> None:
         if self._owns_interface and self.interface is not None:
