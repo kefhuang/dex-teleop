@@ -74,6 +74,24 @@ def _load_controller_config(controller_type: str) -> Any:
     return get_default_controller_config(controller_type)
 
 
+def _is_valid_eef_pose(pose: np.ndarray) -> bool:
+    if pose.shape != (4, 4):
+        return False
+    if not np.all(np.isfinite(pose)):
+        return False
+    if not np.allclose(pose[3, :], [0.0, 0.0, 0.0, 1.0], atol=1e-6):
+        return False
+
+    rotation = pose[:3, :3]
+    if np.allclose(rotation, np.zeros((3, 3)), atol=1e-12):
+        return False
+    if not np.allclose(rotation.T @ rotation, np.eye(3), atol=1e-3):
+        return False
+    if not np.isclose(np.linalg.det(rotation), 1.0, atol=1e-3):
+        return False
+
+    return True
+
 def _quaternion_xyzw_from_rotation(rotation: Any) -> np.ndarray:
     rot = np.asarray(rotation, dtype=float)
     trace = float(np.trace(rot))
@@ -142,7 +160,7 @@ class FrankaArmController:
             return ArmState(arm_id=self.arm_id, pose=Pose.identity())
 
         arr = np.asarray(pose, dtype=float)
-        if arr.shape != (4, 4):
+        if not _is_valid_eef_pose(arr):
             return ArmState(arm_id=self.arm_id, pose=Pose.identity())
 
         return ArmState(

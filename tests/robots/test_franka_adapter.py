@@ -58,6 +58,17 @@ def test_franka_arm_get_state_returns_identity_when_no_eef_pose_available():
     np.testing.assert_allclose(state.pose.orientation, [0.0, 0.0, 0.0, 1.0])
 
 
+def test_franka_arm_get_state_returns_identity_for_zero_eef_pose():
+    fake = FakeFrankaInterface()
+    fake.last_eef_pose = np.zeros((4, 4))
+    arm = FrankaArmController("left", interface_cfg="unused.yml", interface=fake, controller_cfg={})
+
+    state = arm.get_state()
+
+    np.testing.assert_allclose(state.pose.position, [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(state.pose.orientation, [0.0, 0.0, 0.0, 1.0])
+
+
 def test_franka_arm_sends_osc_pose_action_with_neutral_gripper_slot():
     fake = FakeFrankaInterface()
     arm = FrankaArmController("left", interface_cfg="unused.yml", interface=fake, controller_cfg={})
