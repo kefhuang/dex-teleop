@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 
-from dex_teleop.core.types import ControllerState, DeviceState, Pose
+from dex_teleop.core.types import ArmState, ControllerState, DeviceState, Pose
 from dex_teleop.policies.bimanual_clutch import BimanualClutchPolicy
 
 
@@ -56,6 +56,19 @@ def _state(
     return DeviceState(timestamp=1.0, controllers=controllers)
 
 
+def _arm_states(
+    *,
+    left_pos=(0.0, 0.0, 0.0),
+    left_orientation=(0.0, 0.0, 0.0, 1.0),
+    right_pos=(0.0, 0.0, 0.0),
+    right_orientation=(0.0, 0.0, 0.0, 1.0),
+) -> dict[str, ArmState]:
+    return {
+        "left": ArmState("left", Pose(position=left_pos, orientation=left_orientation)),
+        "right": ArmState("right", Pose(position=right_pos, orientation=right_orientation)),
+    }
+
+
 def _cfg() -> dict:
     return {
         "controls": {"clutch_button": "grip", "gripper_axis": "trigger"},
@@ -89,14 +102,31 @@ def _policy() -> BimanualClutchPolicy:
     return _policy_with()
 
 
-def test_update_accepts_arm_states_keyword_without_changing_incremental_behavior():
+def test_update_uses_arm_states_for_anchor_tracking():
     policy = _policy()
-    policy.update(_state(left_pos=(0.0, 0.0, 0.0), left_grip=True), arm_states={})
+    policy.update(
+        _state(left_pos=(0.0, 0.0, 0.0), left_grip=True),
+        arm_states=_arm_states(left_pos=(0.5, 0.0, 0.0)),
+    )
 
-    batch = policy.update(_state(left_pos=(0.2, 0.3, 0.4), left_grip=True), arm_states={})
+    batch = policy.update(
+        _state(left_pos=(0.2, 0.3, 0.4), left_grip=True),
+        arm_states=_arm_states(left_pos=(0.5, 0.0, 0.0)),
+    )
 
     assert batch.motions["left"].enabled is True
     assert np.allclose(batch.motions["left"].delta_position, np.array([0.01, -0.01, 0.01]))
+
+
+def test_held_grip_without_arm_state_disables_motion_and_resets_anchor():
+    policy = _policy()
+
+    batch = policy.update(
+        _state(left_pos=(0.0, 0.0, 0.0), left_grip=True),
+        arm_states={},
+    )
+
+    assert batch.motions["left"].enabled is False
 
 
 def test_grip_released_emits_disabled_motion_and_gripper_command_from_trigger():
@@ -118,30 +148,48 @@ def test_arm_without_gripper_does_not_emit_gripper_command():
     assert batch.grippers["right_gripper"].normalized == 0.0
 
 
-def test_first_grip_press_establishes_previous_pose_and_emits_enabled_zero_delta():
-    batch = _policy().update(_state(left_pos=(1.0, 2.0, 3.0), left_grip=True))
+def test_first_grip_press_establishes_anchor_pose_and_emits_enabled_zero_delta():
+    batch = _policy().update(
+        _state(left_pos=(1.0, 2.0, 3.0), left_grip=True),
+        arm_states=_arm_states(left_pos=(0.4, 0.5, 0.6)),
+    )
 
     assert batch.motions["left"].enabled is True
     assert np.allclose(batch.motions["left"].delta_position, np.zeros(3))
     assert np.allclose(batch.motions["left"].delta_rotation, np.zeros(3))
 
 
-def test_held_grip_outputs_mapped_scaled_limited_incremental_delta():
+def test_held_grip_outputs_mapped_scaled_limited_anchor_error_delta():
     policy = _policy()
-    policy.update(_state(left_pos=(0.0, 0.0, 0.0), left_grip=True))
+    policy.update(
+        _state(left_pos=(0.0, 0.0, 0.0), left_grip=True),
+        arm_states=_arm_states(),
+    )
 
-    batch = policy.update(_state(left_pos=(0.2, 0.3, 0.4), left_grip=True))
+    batch = policy.update(
+        _state(left_pos=(0.2, 0.3, 0.4), left_grip=True),
+        arm_states=_arm_states(),
+    )
 
     assert batch.motions["left"].enabled is True
     assert np.allclose(batch.motions["left"].delta_position, np.array([0.01, -0.01, 0.01]))
 
 
-def test_held_grip_outputs_motion_once_for_repeated_controller_pose():
+def test_held_grip_keeps_outputting_error_until_robot_reaches_anchor_target():
     policy = _policy()
-    policy.update(_state(left_pos=(0.0, 0.0, 0.0), left_grip=True))
+    policy.update(
+        _state(left_pos=(0.0, 0.0, 0.0), left_grip=True),
+        arm_states=_arm_states(),
+    )
 
-    first_at_pose = policy.update(_state(left_pos=(0.2, 0.3, 0.4), left_grip=True))
-    second_at_same_pose = policy.update(_state(left_pos=(0.2, 0.3, 0.4), left_grip=True))
+    first_at_pose = policy.update(
+        _state(left_pos=(0.2, 0.3, 0.4), left_grip=True),
+        arm_states=_arm_states(),
+    )
+    second_at_same_pose = policy.update(
+        _state(left_pos=(0.2, 0.3, 0.4), left_grip=True),
+        arm_states=_arm_states(left_pos=(0.4, -0.2, 0.3)),
+    )
 
     assert np.allclose(
         first_at_pose.motions["left"].delta_position,
@@ -152,7 +200,7 @@ def test_held_grip_outputs_motion_once_for_repeated_controller_pose():
     assert np.allclose(second_at_same_pose.motions["left"].delta_rotation, np.zeros(3))
 
 
-def test_held_grip_uses_previous_pose_snapshot_when_controller_pose_mutates_in_place():
+def test_held_grip_uses_anchor_pose_snapshot_when_controller_pose_mutates_in_place():
     policy = _policy()
     pose = Pose(
         position=np.array([0.0, 0.0, 0.0]),
@@ -165,16 +213,16 @@ def test_held_grip_uses_previous_pose_snapshot_when_controller_pose_mutates_in_p
         axes={"trigger": 0.0},
     )
     state = DeviceState(timestamp=1.0, controllers={"left": controller})
-    policy.update(state)
+    policy.update(state, arm_states=_arm_states())
 
     pose.position[:] = np.array([0.2, 0.3, 0.4])
-    batch = policy.update(state)
+    batch = policy.update(state, arm_states=_arm_states())
 
     assert batch.motions["left"].enabled is True
     assert np.allclose(batch.motions["left"].delta_position, np.array([0.01, -0.01, 0.01]))
 
 
-def test_left_and_right_clutch_previous_poses_are_independent():
+def test_left_and_right_clutch_anchor_poses_are_independent():
     policy = _policy()
     policy.update(
         _state(
@@ -182,7 +230,8 @@ def test_left_and_right_clutch_previous_poses_are_independent():
             left_grip=True,
             right_pos=(0.0, 0.0, 0.0),
             right_grip=False,
-        )
+        ),
+        arm_states=_arm_states(),
     )
 
     batch = policy.update(
@@ -191,7 +240,8 @@ def test_left_and_right_clutch_previous_poses_are_independent():
             left_grip=True,
             right_pos=(0.7, -0.4, 0.3),
             right_grip=True,
-        )
+        ),
+        arm_states=_arm_states(),
     )
 
     assert batch.motions["left"].enabled is True
@@ -209,13 +259,17 @@ def test_held_grip_outputs_mapped_scaled_limited_rotation_delta():
         },
         scales={"position": 1.0, "rotation": 1.0},
     )
-    policy.update(_state(left_orientation=(0.0, 0.0, 0.0, 1.0), left_grip=True))
+    policy.update(
+        _state(left_orientation=(0.0, 0.0, 0.0, 1.0), left_grip=True),
+        arm_states=_arm_states(),
+    )
 
     batch = policy.update(
         _state(
             left_orientation=(0.0, 0.0, math.sin(math.pi / 4.0), math.cos(math.pi / 4.0)),
             left_grip=True,
-        )
+        ),
+        arm_states=_arm_states(),
     )
 
     assert batch.motions["left"].enabled is True
@@ -237,14 +291,18 @@ def test_rotation_deadzone_zeroes_small_rotation_after_mapping_and_scale():
             "send_zero_when_idle": True,
         },
     )
-    policy.update(_state(left_orientation=(0.0, 0.0, 0.0, 1.0), left_grip=True))
+    policy.update(
+        _state(left_orientation=(0.0, 0.0, 0.0, 1.0), left_grip=True),
+        arm_states=_arm_states(),
+    )
 
     small_yaw = 0.01
     batch = policy.update(
         _state(
             left_orientation=(0.0, 0.0, math.sin(small_yaw / 2.0), math.cos(small_yaw / 2.0)),
             left_grip=True,
-        )
+        ),
+        arm_states=_arm_states(),
     )
 
     assert batch.motions["left"].enabled is True
@@ -266,20 +324,32 @@ def test_position_deadzone_zeroes_small_position_delta_after_mapping_and_scale()
             "send_zero_when_idle": True,
         },
     )
-    policy.update(_state(left_pos=(0.0, 0.0, 0.0), left_grip=True))
+    policy.update(
+        _state(left_pos=(0.0, 0.0, 0.0), left_grip=True),
+        arm_states=_arm_states(),
+    )
 
-    batch = policy.update(_state(left_pos=(0.03, 0.0, 0.0), left_grip=True))
+    batch = policy.update(
+        _state(left_pos=(0.03, 0.0, 0.0), left_grip=True),
+        arm_states=_arm_states(),
+    )
 
     assert batch.motions["left"].enabled is True
     assert np.allclose(batch.motions["left"].delta_position, np.zeros(3))
 
 
-def test_grip_release_clears_previous_pose_and_disables_motion():
+def test_grip_release_clears_anchor_pose_and_disables_motion():
     policy = _policy()
-    policy.update(_state(left_pos=(0.0, 0.0, 0.0), left_grip=True))
-    policy.update(_state(left_pos=(0.2, 0.3, 0.4), left_grip=False))
+    policy.update(
+        _state(left_pos=(0.0, 0.0, 0.0), left_grip=True),
+        arm_states=_arm_states(),
+    )
+    policy.update(_state(left_pos=(0.2, 0.3, 0.4), left_grip=False), arm_states=_arm_states())
 
-    batch = policy.update(_state(left_pos=(0.2, 0.3, 0.4), left_grip=True))
+    batch = policy.update(
+        _state(left_pos=(0.2, 0.3, 0.4), left_grip=True),
+        arm_states=_arm_states(),
+    )
 
     assert batch.motions["left"].enabled is True
     assert np.allclose(batch.motions["left"].delta_position, np.zeros(3))
@@ -287,7 +357,10 @@ def test_grip_release_clears_previous_pose_and_disables_motion():
 
 def test_missing_controller_disables_bound_arm_and_zeroes_gripper():
     policy = _policy()
-    policy.update(_state(left_grip=True, right_present=True, right_grip=True, right_trigger=0.8))
+    policy.update(
+        _state(left_grip=True, right_present=True, right_grip=True, right_trigger=0.8),
+        arm_states=_arm_states(),
+    )
     state = DeviceState(timestamp=2.0, controllers={})
 
     batch = policy.update(state)

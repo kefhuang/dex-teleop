@@ -24,7 +24,8 @@ from dex_teleop.utils.transforms import (
 @dataclass
 class _ArmClutchState:
     active: bool = False
-    previous_pose: Pose | None = None
+    controller_anchor_pose: Pose | None = None
+    robot_anchor_pose: Pose | None = None
 
 
 def _snapshot_pose(pose: Pose) -> Pose:
@@ -121,10 +122,21 @@ class BimanualClutchPolicy:
                 motions[arm_id] = MotionCommand.disabled(arm_id)
                 continue
 
-            if not clutch_state.active or clutch_state.previous_pose is None:
+            robot_state = arm_states.get(arm_id) if arm_states is not None else None
+            if robot_state is None:
+                self._states[arm_id] = _ArmClutchState()
+                motions[arm_id] = MotionCommand.disabled(arm_id)
+                continue
+
+            if (
+                not clutch_state.active
+                or clutch_state.controller_anchor_pose is None
+                or clutch_state.robot_anchor_pose is None
+            ):
                 self._states[arm_id] = _ArmClutchState(
                     active=True,
-                    previous_pose=_snapshot_pose(controller.pose),
+                    controller_anchor_pose=_snapshot_pose(controller.pose),
+                    robot_anchor_pose=_snapshot_pose(robot_state.pose),
                 )
                 motions[arm_id] = MotionCommand(
                     arm_id=arm_id,
@@ -134,10 +146,16 @@ class BimanualClutchPolicy:
                 )
                 continue
 
-            raw_position_delta = controller.pose.position - clutch_state.previous_pose.position
-            raw_rotation_delta = quaternion_delta_rpy(
-                clutch_state.previous_pose.orientation,
+            raw_position_delta = (
+                controller.pose.position - clutch_state.controller_anchor_pose.position
+            )
+            controller_rotation_delta = quaternion_delta_rpy(
+                clutch_state.controller_anchor_pose.orientation,
                 controller.pose.orientation,
+            )
+            robot_rotation_delta = quaternion_delta_rpy(
+                clutch_state.robot_anchor_pose.orientation,
+                robot_state.pose.orientation,
             )
             mapped_position = axis_mapping(
                 raw_position_delta,
@@ -146,18 +164,25 @@ class BimanualClutchPolicy:
                 input_axes=("x", "y", "z"),
             )
             mapped_rotation = axis_mapping(
-                raw_rotation_delta,
+                controller_rotation_delta,
                 self.rotation_axes,
                 output_axes=("roll", "pitch", "yaw"),
                 input_axes=("roll", "pitch", "yaw"),
             )
 
+            desired_position = (
+                clutch_state.robot_anchor_pose.position + mapped_position * self.position_scale
+            )
+            position_error = desired_position - robot_state.pose.position
+            desired_rotation_delta = mapped_rotation * self.rotation_scale
+            rotation_error = desired_rotation_delta - robot_rotation_delta
+
             delta_position = limit_components(
-                apply_deadzone(mapped_position * self.position_scale, self.position_deadzone),
+                apply_deadzone(position_error, self.position_deadzone),
                 self.max_translation_per_cycle,
             )
             delta_rotation = limit_components(
-                apply_deadzone(mapped_rotation * self.rotation_scale, self.rotation_deadzone),
+                apply_deadzone(rotation_error, self.rotation_deadzone),
                 self.max_rotation_per_cycle,
             )
             motions[arm_id] = MotionCommand(
@@ -165,10 +190,6 @@ class BimanualClutchPolicy:
                 delta_position=delta_position,
                 delta_rotation=delta_rotation,
                 enabled=True,
-            )
-            self._states[arm_id] = _ArmClutchState(
-                active=True,
-                previous_pose=_snapshot_pose(controller.pose),
             )
 
         return TeleopCommandBatch(motions=motions, grippers=grippers)
