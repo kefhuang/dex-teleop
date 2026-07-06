@@ -53,6 +53,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--duration", type=float, default=None, help="Optional run duration in seconds")
     parser.add_argument("--rate-hz", type=float, default=None, help="Override control-loop rate")
     parser.add_argument("--log-level", default="INFO", help="Python logging level")
+    parser.add_argument(
+        "--print-commands",
+        action="store_true",
+        help="Print controller state and generated commands each control cycle",
+    )
     return parser.parse_args(argv)
 
 
@@ -146,6 +151,28 @@ def _make_grippers(
     return grippers
 
 
+def _format_vector(values: Any) -> list[float]:
+    return [round(float(value), 4) for value in values]
+
+
+def _print_command_batch(iteration: int, state: Any, batch: Any) -> None:
+    print(f"[{iteration:04d}] controllers={list(state.controllers.keys())}")
+    for name, controller in state.controllers.items():
+        print(
+            f"  {name}: pos={_format_vector(controller.pose.position)} "
+            f"grip={controller.button('grip')} "
+            f"trigger={controller.axis('trigger'):.3f}"
+        )
+    for arm_id, command in batch.motions.items():
+        print(
+            f"  motion[{arm_id}]: enabled={command.enabled} "
+            f"dpos={_format_vector(command.delta_position)} "
+            f"drot={_format_vector(command.delta_rotation)}"
+        )
+    for gripper_id, command in batch.grippers.items():
+        print(f"  gripper[{gripper_id}]: normalized={command.normalized:.3f}")
+
+
 def _safe_call(label: str, func: Any) -> None:
     try:
         func()
@@ -153,7 +180,7 @@ def _safe_call(label: str, func: Any) -> None:
         logger.warning("Ignoring %s failure during shutdown: %s", label, exc)
 
 
-def run(cfg: dict[str, Any], duration: float | None = None) -> int:
+def run(cfg: dict[str, Any], duration: float | None = None, *, print_commands: bool = False) -> int:
     _validate_real_hardware_config(cfg)
     device = _make_device(cfg)
     arms = _make_arms(cfg)
@@ -206,9 +233,13 @@ def run(cfg: dict[str, Any], duration: float | None = None) -> int:
                     ) from exc
                 raise
 
+        iteration = 0
         while deadline is None or time.monotonic() < deadline:
             state = device.read()
             batch = policy.update(state)
+            if print_commands:
+                _print_command_batch(iteration, state, batch)
+            iteration += 1
             for arm_id, command in batch.motions.items():
                 arm = arms[arm_id]
                 if command.enabled:
@@ -246,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
             mock_controller=args.mock_controller,
             rate_hz=args.rate_hz,
         )
-        return run(cfg, duration=args.duration)
+        return run(cfg, duration=args.duration, print_commands=args.print_commands)
     except ConfigError as exc:
         print(f"Config error: {exc}")
         return 2

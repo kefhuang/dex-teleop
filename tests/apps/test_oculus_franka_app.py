@@ -336,3 +336,25 @@ def test_real_franka_connect_error_mentions_manually_started_deoxys_backend(
     assert "Teleop error" in captured.out
     assert "Deoxys backend" in captured.out
     assert "manually started" in captured.out
+
+
+def test_app_print_commands_outputs_dry_run_commands(capsys):
+    code = main(
+        [
+            "--config",
+            "configs/oculus_franka_bimanual.yml",
+            "--mock-controller",
+            "--dry-run",
+            "--duration",
+            "0.2",
+            "--rate-hz",
+            "30",
+            "--print-commands",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert code == 0
+    assert "controllers=" in captured.out
+    assert "motion[left]" in captured.out
+    assert "gripper[left_gripper]" in captured.out
