@@ -126,6 +126,24 @@ def test_unknown_gripper_reference_reports_arm_path(tmp_path: Path):
         load_config(path)
 
 
+def test_arm_can_explicitly_have_no_gripper(tmp_path: Path):
+    path = tmp_path / "arm_only.yml"
+    path.write_text(
+        _VALID_CONFIG.replace("    gripper: left_gripper", "    gripper: null").replace(
+            """grippers:
+  left_gripper:
+    type: franka
+    arm: left""",
+            "grippers: {}",
+        )
+    )
+
+    cfg = load_config(path)
+
+    assert cfg["arms"]["left"]["gripper"] is None
+    assert cfg["grippers"] == {}
+
+
 def test_unknown_gripper_arm_reference_reports_gripper_path(tmp_path: Path):
     path = tmp_path / "bad.yml"
     path.write_text(_VALID_CONFIG.replace("arm: left", "arm: missing_arm"))

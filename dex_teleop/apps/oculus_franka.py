@@ -250,7 +250,9 @@ def run(cfg: dict[str, Any], duration: float | None = None, *, print_commands: b
                         arm.stop_motion()
                         arm_moving[arm_id] = False
             for gripper_id, command in batch.grippers.items():
-                grippers[gripper_id].send_gripper(command)
+                gripper = grippers.get(gripper_id)
+                if gripper is not None:
+                    gripper.send_gripper(command)
             rate.sleep()
     except KeyboardInterrupt:
         logger.info("Interrupted by user")

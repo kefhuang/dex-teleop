@@ -64,3 +64,20 @@ Controls:
 - Ctrl-C: graceful shutdown.
 
 The example config defaults to `dry_run: true` and `mock_controller: true` for safety.
+
+If an arm has no gripper attached, set that arm's gripper binding to `null`
+and omit the matching entry from `grippers`:
+
+```yaml
+arms:
+  right:
+    type: franka
+    interface_cfg: dependency/deoxys_control/deoxys/config/franka-three.yml
+    controller: right
+    gripper: null
+
+grippers: {}
+```
+
+With this setup, Oculus grip still controls the arm clutch; trigger commands are
+ignored for that arm.

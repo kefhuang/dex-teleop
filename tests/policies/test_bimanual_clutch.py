@@ -97,6 +97,17 @@ def test_grip_released_emits_disabled_motion_and_gripper_command_from_trigger():
     assert batch.grippers["left_gripper"].normalized == 0.25
 
 
+def test_arm_without_gripper_does_not_emit_gripper_command():
+    policy = _policy_with(arms={"left": {"controller": "left", "gripper": None}})
+
+    batch = policy.update(_state(left_grip=False, left_trigger=0.25))
+
+    assert batch.motions["left"].enabled is False
+    assert "left_gripper" not in batch.grippers
+    assert set(batch.grippers) == {"right_gripper"}
+    assert batch.grippers["right_gripper"].normalized == 0.0
+
+
 def test_first_grip_press_establishes_previous_pose_and_emits_enabled_zero_delta():
     batch = _policy().update(_state(left_pos=(1.0, 2.0, 3.0), left_grip=True))
 

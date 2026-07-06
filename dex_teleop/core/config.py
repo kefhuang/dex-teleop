@@ -85,6 +85,8 @@ def _validate(cfg: dict[str, Any]) -> None:
         for key in ("type", "interface_cfg", "controller", "gripper"):
             _require(arm_cfg, key, arm_path)
         gripper_id = arm_cfg["gripper"]
+        if gripper_id is None:
+            continue
         if gripper_id not in grippers:
             raise ConfigError(
                 f"{arm_path}.gripper references unknown gripper {gripper_id!r}"
@@ -105,6 +107,8 @@ def _validate(cfg: dict[str, Any]) -> None:
         arm_path = f"arms.{arm_id}"
         arm_cfg = _require_mapping(arm_cfg_value, arm_path)
         gripper_id = arm_cfg["gripper"]
+        if gripper_id is None:
+            continue
         gripper_path = f"grippers.{gripper_id}"
         gripper_cfg = _require_mapping(grippers[gripper_id], gripper_path)
         gripper_arm_id = gripper_cfg["arm"]

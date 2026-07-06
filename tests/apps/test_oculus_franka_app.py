@@ -6,7 +6,7 @@ import pytest
 
 from dex_teleop.apps import oculus_franka
 from dex_teleop.apps.oculus_franka import main
-from dex_teleop.core.types import MotionCommand, TeleopCommandBatch
+from dex_teleop.core.types import GripperCommand, MotionCommand, TeleopCommandBatch
 
 
 def test_app_dry_run_mock_controller_smoke(capsys):
@@ -103,6 +103,61 @@ def test_repeated_disabled_motion_stops_only_during_cleanup(monkeypatch):
 
     assert arm.sent_commands == []
     assert arm.stop_count == 1
+
+
+def test_run_ignores_gripper_command_for_unconfigured_gripper(monkeypatch):
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def start(self) -> None:
+            pass
+
+        def read(self):
+            self.reads += 1
+            if self.reads > 1:
+                raise KeyboardInterrupt
+            return object()
+
+        def stop(self) -> None:
+            pass
+
+    class FakeArm:
+        def connect(self) -> None:
+            pass
+
+        def send_motion(self, command: MotionCommand) -> None:
+            pass
+
+        def stop_motion(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    class FakePolicy:
+        @classmethod
+        def from_config(cls, cfg):
+            return cls()
+
+        def update(self, state):
+            return TeleopCommandBatch(
+                motions={"left": MotionCommand.disabled("left")},
+                grippers={"missing_gripper": GripperCommand("missing_gripper", 0.5)},
+            )
+
+    cfg = {
+        "app": {"dry_run": True, "rate_hz": 1000},
+        "input": {"mock_controller": True},
+        "arms": {"left": {"gripper": None}},
+        "grippers": {},
+    }
+    monkeypatch.setattr(oculus_franka, "_make_device", lambda cfg: FakeDevice())
+    monkeypatch.setattr(oculus_franka, "_make_arms", lambda cfg: {"left": FakeArm()})
+    monkeypatch.setattr(oculus_franka, "_make_grippers", lambda cfg, arms: {})
+    monkeypatch.setattr(oculus_franka, "BimanualClutchPolicy", FakePolicy)
+
+    assert oculus_franka.run(cfg) == 0
 
 
 def test_real_app_connects_arms_before_creating_grippers(monkeypatch):

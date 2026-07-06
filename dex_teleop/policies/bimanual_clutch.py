@@ -99,13 +99,15 @@ class BimanualClutchPolicy:
             if controller is None:
                 self._states[arm_id] = _ArmClutchState()
                 motions[arm_id] = MotionCommand.disabled(arm_id)
-                grippers[gripper_id] = GripperCommand(gripper_id, 0.0)
+                if gripper_id is not None:
+                    grippers[gripper_id] = GripperCommand(gripper_id, 0.0)
                 continue
 
-            grippers[gripper_id] = GripperCommand(
-                gripper_id,
-                controller.axis(self.gripper_axis),
-            )
+            if gripper_id is not None:
+                grippers[gripper_id] = GripperCommand(
+                    gripper_id,
+                    controller.axis(self.gripper_axis),
+                )
 
             clutch_state = self._states[arm_id]
             if not controller.button(self.clutch_button):
