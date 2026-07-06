@@ -107,6 +107,7 @@ def run(cfg: dict[str, Any], duration: float | None = None) -> int:
         device.start()
         for arm in arms.values():
             arm.connect()
+        arm_moving = {arm_id: False for arm_id in arms}
         grippers = _make_grippers(cfg, arms)
         for gripper in grippers.values():
             gripper.connect()
@@ -118,8 +119,11 @@ def run(cfg: dict[str, Any], duration: float | None = None) -> int:
                 arm = arms[arm_id]
                 if command.enabled:
                     arm.send_motion(command)
+                    arm_moving[arm_id] = True
                 else:
-                    arm.stop_motion()
+                    if arm_moving.get(arm_id, False):
+                        arm.stop_motion()
+                        arm_moving[arm_id] = False
             for gripper_id, command in batch.grippers.items():
                 grippers[gripper_id].send_gripper(command)
             rate.sleep()
