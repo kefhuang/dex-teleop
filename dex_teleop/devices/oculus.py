@@ -57,7 +57,9 @@ class OculusDevice:
         controllers: dict[str, ControllerState] = {}
         for name in ("left", "right"):
             matrix = self._find_transform(transforms, name)
-            pose = self._pose_from_matrix(matrix) if matrix is not None else Pose.identity()
+            if matrix is None:
+                continue
+            pose = self._pose_from_matrix(matrix)
             controllers[name] = ControllerState(
                 name=name,
                 pose=pose,
