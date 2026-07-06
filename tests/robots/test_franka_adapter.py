@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import sys
+import types
+
 from dex_teleop.core.types import GripperCommand, MotionCommand
 from dex_teleop.robots.franka import FrankaArmController, FrankaGripperController
 
@@ -62,13 +65,71 @@ def test_franka_arm_disabled_motion_sends_zero_termination_action():
     )
 
 
-def test_franka_arm_close_calls_interface_close():
+def test_franka_arm_close_marks_injected_interface_closed_without_closing_interface():
     fake = FakeFrankaInterface()
     arm = FrankaArmController("left", interface_cfg="unused.yml", interface=fake, controller_cfg={})
     arm.connect()
     arm.close()
 
-    assert fake.closed is True
+    assert arm.closed is True
+    assert fake.closed is False
+
+
+def test_franka_arm_connect_constructs_owned_interface_without_gripper(monkeypatch):
+    constructor_calls = []
+
+    class ConstructedFakeFrankaInterface(FakeFrankaInterface):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            constructor_calls.append((args, kwargs))
+
+    monkeypatch.setitem(sys.modules, "deoxys", types.ModuleType("deoxys"))
+    monkeypatch.setitem(
+        sys.modules,
+        "deoxys.franka_interface",
+        types.SimpleNamespace(FrankaInterface=ConstructedFakeFrankaInterface),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "deoxys.utils.config_utils",
+        types.SimpleNamespace(get_default_controller_config=lambda controller_type: {"type": controller_type}),
+    )
+
+    arm = FrankaArmController("left", interface_cfg="robot.yml")
+    arm.connect()
+
+    assert constructor_calls == [
+        (("robot.yml",), {"has_gripper": False, "use_visualizer": False})
+    ]
+    assert arm.controller_cfg == {"type": "OSC_POSE"}
+
+
+def test_franka_arm_close_closes_owned_constructed_interface(monkeypatch):
+    constructed = []
+
+    class ConstructedFakeFrankaInterface(FakeFrankaInterface):
+        def __init__(self, *args, **kwargs):
+            super().__init__()
+            constructed.append(self)
+
+    monkeypatch.setitem(sys.modules, "deoxys", types.ModuleType("deoxys"))
+    monkeypatch.setitem(
+        sys.modules,
+        "deoxys.franka_interface",
+        types.SimpleNamespace(FrankaInterface=ConstructedFakeFrankaInterface),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "deoxys.utils.config_utils",
+        types.SimpleNamespace(get_default_controller_config=lambda controller_type: {}),
+    )
+
+    arm = FrankaArmController("left", interface_cfg="robot.yml")
+    arm.connect()
+    arm.close()
+
+    assert arm.closed is True
+    assert constructed[0].closed is True
 
 
 def test_franka_gripper_converts_normalized_to_deoxys_action():

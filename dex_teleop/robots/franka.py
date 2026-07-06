@@ -35,6 +35,24 @@ def _ensure_deoxys_on_path() -> None:
         sys.path.insert(0, root_str)
 
 
+def _create_franka_interface(interface_cfg: str) -> Any:
+    _ensure_deoxys_on_path()
+    from deoxys.franka_interface import FrankaInterface
+
+    return FrankaInterface(
+        interface_cfg,
+        has_gripper=False,
+        use_visualizer=False,
+    )
+
+
+def _load_controller_config(controller_type: str) -> Any:
+    _ensure_deoxys_on_path()
+    from deoxys.utils.config_utils import get_default_controller_config
+
+    return get_default_controller_config(controller_type)
+
+
 class FrankaArmController:
     def __init__(
         self,
@@ -54,13 +72,9 @@ class FrankaArmController:
 
     def connect(self) -> None:
         if self.interface is None:
-            _ensure_deoxys_on_path()
-            from deoxys.franka_interface import FrankaInterface
-            from deoxys.utils.config_utils import get_default_controller_config
-
-            self.interface = FrankaInterface(self.interface_cfg, use_visualizer=False)
+            self.interface = _create_franka_interface(self.interface_cfg)
             if self.controller_cfg is None:
-                self.controller_cfg = get_default_controller_config(_CONTROLLER_TYPE)
+                self.controller_cfg = _load_controller_config(_CONTROLLER_TYPE)
         self.connected = True
 
     def get_state(self) -> ArmState:
@@ -80,7 +94,7 @@ class FrankaArmController:
         self._control(list(_ZERO_ACTION), termination=True)
 
     def close(self) -> None:
-        if self.interface is not None:
+        if self._owns_interface and self.interface is not None:
             self.interface.close()
         self.closed = True
 
