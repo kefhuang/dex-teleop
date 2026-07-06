@@ -140,3 +140,15 @@ def test_franka_gripper_converts_normalized_to_deoxys_action():
     gripper.send_gripper(GripperCommand("left_gripper", 0.0))
 
     assert fake.gripper_calls == [1.0, -1.0]
+
+def test_franka_gripper_uses_arm_interface_after_arm_connect_with_injected_fake():
+    fake = FakeFrankaInterface()
+    arm = FrankaArmController("left", interface_cfg="unused.yml", interface=fake, controller_cfg={})
+
+    arm.connect()
+    gripper = FrankaGripperController("left_gripper", interface=arm.interface)
+    gripper.connect()
+    gripper.send_gripper(GripperCommand("left_gripper", 0.75))
+
+    assert arm.interface is fake
+    assert fake.gripper_calls == [0.5]

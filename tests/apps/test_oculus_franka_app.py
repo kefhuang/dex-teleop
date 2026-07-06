@@ -99,3 +99,85 @@ def test_repeated_disabled_motion_stops_only_during_cleanup(monkeypatch):
 
     assert arm.sent_commands == []
     assert arm.stop_count == 1
+
+def test_real_app_connects_arms_before_creating_grippers(monkeypatch):
+    events: list[str] = []
+
+    class FakeDevice:
+        def start(self) -> None:
+            events.append("device.start")
+
+        def read(self):
+            raise KeyboardInterrupt
+
+        def stop(self) -> None:
+            events.append("device.stop")
+
+    class FakeArm:
+        def __init__(self, arm_id: str, interface_cfg: str) -> None:
+            self.arm_id = arm_id
+            self.interface_cfg = interface_cfg
+            self.interface = None
+
+        def connect(self) -> None:
+            events.append(f"{self.arm_id}.connect")
+            self.interface = {"arm_id": self.arm_id}
+
+        def stop_motion(self) -> None:
+            events.append(f"{self.arm_id}.stop")
+
+        def close(self) -> None:
+            events.append(f"{self.arm_id}.close")
+
+    class FakeGripper:
+        def __init__(self, gripper_id: str, *, interface) -> None:
+            events.append(f"{gripper_id}.created")
+            assert interface == {"arm_id": "left"}
+            self.gripper_id = gripper_id
+            self.interface = interface
+
+        def connect(self) -> None:
+            events.append(f"{self.gripper_id}.connect")
+
+        def send_gripper(self, command) -> None:
+            raise AssertionError("loop should stop before commands are sent")
+
+        def close(self) -> None:
+            events.append(f"{self.gripper_id}.close")
+
+    class FakePolicy:
+        @classmethod
+        def from_config(cls, cfg):
+            return cls()
+
+        def update(self, state):
+            raise AssertionError("device read interrupts before policy update")
+
+    cfg = {
+        "app": {"dry_run": False, "rate_hz": 1000},
+        "input": {"mock_controller": True},
+        "arms": {"left": {"interface_cfg": "left.yml"}},
+        "grippers": {"left_gripper": {"arm": "left"}},
+    }
+    monkeypatch.setattr(oculus_franka, "_make_device", lambda cfg: FakeDevice())
+    monkeypatch.setattr(oculus_franka, "FrankaArmController", FakeArm)
+    monkeypatch.setattr(oculus_franka, "FrankaGripperController", FakeGripper)
+    monkeypatch.setattr(oculus_franka, "BimanualClutchPolicy", FakePolicy)
+
+    assert oculus_franka.run(cfg) == 0
+
+    assert events.index("left.connect") < events.index("left_gripper.created")
+
+
+def test_dry_run_make_grippers_uses_mock_grippers_without_arm_interface():
+    class FakeArmWithoutInterface:
+        interface = None
+
+    cfg = {
+        "app": {"dry_run": True},
+        "grippers": {"left_gripper": {"arm": "left"}},
+    }
+
+    grippers = oculus_franka._make_grippers(cfg, {"left": FakeArmWithoutInterface()})
+
+    assert isinstance(grippers["left_gripper"], oculus_franka.MockGripperController)
