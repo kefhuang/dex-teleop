@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 
 from dex_teleop.core.types import (
+    ArmState,
     DeviceState,
     GripperCommand,
     MotionCommand,
@@ -87,7 +88,12 @@ class BimanualClutchPolicy:
             send_zero_when_idle=cfg["safety"]["send_zero_when_idle"],
         )
 
-    def update(self, state: DeviceState) -> TeleopCommandBatch:
+    def update(
+        self,
+        state: DeviceState,
+        *,
+        arm_states: dict[str, ArmState] | None = None,
+    ) -> TeleopCommandBatch:
         motions: dict[str, MotionCommand] = {}
         grippers: dict[str, GripperCommand] = {}
 

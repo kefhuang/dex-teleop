@@ -89,6 +89,16 @@ def _policy() -> BimanualClutchPolicy:
     return _policy_with()
 
 
+def test_update_accepts_arm_states_keyword_without_changing_incremental_behavior():
+    policy = _policy()
+    policy.update(_state(left_pos=(0.0, 0.0, 0.0), left_grip=True), arm_states={})
+
+    batch = policy.update(_state(left_pos=(0.2, 0.3, 0.4), left_grip=True), arm_states={})
+
+    assert batch.motions["left"].enabled is True
+    assert np.allclose(batch.motions["left"].delta_position, np.array([0.01, -0.01, 0.01]))
+
+
 def test_grip_released_emits_disabled_motion_and_gripper_command_from_trigger():
     batch = _policy().update(_state(left_grip=False, left_trigger=0.25))
 
