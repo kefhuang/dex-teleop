@@ -74,6 +74,41 @@ def _load_controller_config(controller_type: str) -> Any:
     return get_default_controller_config(controller_type)
 
 
+def _quaternion_xyzw_from_rotation(rotation: Any) -> np.ndarray:
+    rot = np.asarray(rotation, dtype=float)
+    trace = float(np.trace(rot))
+    if trace > 0.0:
+        scale = 2.0 * np.sqrt(trace + 1.0)
+        w = 0.25 * scale
+        x = (rot[2, 1] - rot[1, 2]) / scale
+        y = (rot[0, 2] - rot[2, 0]) / scale
+        z = (rot[1, 0] - rot[0, 1]) / scale
+    elif rot[0, 0] > rot[1, 1] and rot[0, 0] > rot[2, 2]:
+        scale = 2.0 * np.sqrt(1.0 + rot[0, 0] - rot[1, 1] - rot[2, 2])
+        w = (rot[2, 1] - rot[1, 2]) / scale
+        x = 0.25 * scale
+        y = (rot[0, 1] + rot[1, 0]) / scale
+        z = (rot[0, 2] + rot[2, 0]) / scale
+    elif rot[1, 1] > rot[2, 2]:
+        scale = 2.0 * np.sqrt(1.0 + rot[1, 1] - rot[0, 0] - rot[2, 2])
+        w = (rot[0, 2] - rot[2, 0]) / scale
+        x = (rot[0, 1] + rot[1, 0]) / scale
+        y = 0.25 * scale
+        z = (rot[1, 2] + rot[2, 1]) / scale
+    else:
+        scale = 2.0 * np.sqrt(1.0 + rot[2, 2] - rot[0, 0] - rot[1, 1])
+        w = (rot[1, 0] - rot[0, 1]) / scale
+        x = (rot[0, 2] + rot[2, 0]) / scale
+        y = (rot[1, 2] + rot[2, 1]) / scale
+        z = 0.25 * scale
+
+    quat = np.array([x, y, z, w], dtype=float)
+    norm = np.linalg.norm(quat)
+    if norm == 0.0:
+        return np.array([0.0, 0.0, 0.0, 1.0])
+    return quat / norm
+
+
 class FrankaArmController:
     def __init__(
         self,
@@ -99,7 +134,24 @@ class FrankaArmController:
         self.connected = True
 
     def get_state(self) -> ArmState:
-        return ArmState(arm_id=self.arm_id, pose=Pose.identity())
+        if self.interface is None:
+            return ArmState(arm_id=self.arm_id, pose=Pose.identity())
+
+        pose = getattr(self.interface, "last_eef_pose", None)
+        if pose is None:
+            return ArmState(arm_id=self.arm_id, pose=Pose.identity())
+
+        arr = np.asarray(pose, dtype=float)
+        if arr.shape != (4, 4):
+            return ArmState(arm_id=self.arm_id, pose=Pose.identity())
+
+        return ArmState(
+            arm_id=self.arm_id,
+            pose=Pose(
+                position=arr[:3, 3],
+                orientation=_quaternion_xyzw_from_rotation(arr[:3, :3]),
+            ),
+        )
 
     def send_motion(self, command: MotionCommand) -> None:
         if not command.enabled:

@@ -3,6 +3,8 @@ from __future__ import annotations
 import sys
 import types
 
+import numpy as np
+
 from dex_teleop.core.types import GripperCommand, MotionCommand
 from dex_teleop.robots.franka import FrankaArmController, FrankaGripperController
 
@@ -25,6 +27,35 @@ class FakeFrankaInterface:
 
     def close(self):
         self.closed = True
+
+
+def test_franka_arm_get_state_reads_last_eef_pose_from_interface():
+    fake = FakeFrankaInterface()
+    fake.last_eef_pose = np.array(
+        [
+            [1.0, 0.0, 0.0, 0.4],
+            [0.0, 1.0, 0.0, -0.2],
+            [0.0, 0.0, 1.0, 0.3],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    )
+    arm = FrankaArmController("left", interface_cfg="unused.yml", interface=fake, controller_cfg={})
+
+    state = arm.get_state()
+
+    np.testing.assert_allclose(state.pose.position, [0.4, -0.2, 0.3])
+    np.testing.assert_allclose(state.pose.orientation, [0.0, 0.0, 0.0, 1.0])
+
+
+def test_franka_arm_get_state_returns_identity_when_no_eef_pose_available():
+    fake = FakeFrankaInterface()
+    fake.last_eef_pose = None
+    arm = FrankaArmController("left", interface_cfg="unused.yml", interface=fake, controller_cfg={})
+
+    state = arm.get_state()
+
+    np.testing.assert_allclose(state.pose.position, [0.0, 0.0, 0.0])
+    np.testing.assert_allclose(state.pose.orientation, [0.0, 0.0, 0.0, 1.0])
 
 
 def test_franka_arm_sends_osc_pose_action_with_neutral_gripper_slot():
