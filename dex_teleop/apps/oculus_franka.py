@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import logging
 import time
 from typing import Any
@@ -180,6 +181,14 @@ def _safe_call(label: str, func: Any) -> None:
         logger.warning("Ignoring %s failure during shutdown: %s", label, exc)
 
 
+def _policy_accepts_arm_states(policy: Any) -> bool:
+    signature = inspect.signature(policy.update)
+    return "arm_states" in signature.parameters or any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    )
+
+
 def run(cfg: dict[str, Any], duration: float | None = None, *, print_commands: bool = False) -> int:
     _validate_real_hardware_config(cfg)
     device = _make_device(cfg)
@@ -190,6 +199,7 @@ def run(cfg: dict[str, Any], duration: float | None = None, *, print_commands: b
     deadline = None if duration is None else time.monotonic() + float(duration)
 
     send_zero_when_idle = bool(cfg.get("safety", {}).get("send_zero_when_idle", False))
+    policy_accepts_arm_states = _policy_accepts_arm_states(policy)
 
     print(
         f"Starting teleop dry_run={cfg['app']['dry_run']} "
@@ -238,7 +248,11 @@ def run(cfg: dict[str, Any], duration: float | None = None, *, print_commands: b
         iteration = 0
         while deadline is None or time.monotonic() < deadline:
             state = device.read()
-            batch = policy.update(state)
+            arm_states = {arm_id: arm.get_state() for arm_id, arm in arms.items()}
+            if policy_accepts_arm_states:
+                batch = policy.update(state, arm_states=arm_states)
+            else:
+                batch = policy.update(state)
             if print_commands:
                 _print_command_batch(iteration, state, batch)
             iteration += 1

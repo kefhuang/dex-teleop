@@ -70,6 +70,9 @@ def test_repeated_disabled_motion_sends_zero_keepalive_when_configured(monkeypat
         def connect(self) -> None:
             pass
 
+        def get_state(self):
+            return None
+
         def send_motion(self, command: MotionCommand) -> None:
             self.sent_commands.append(command)
 
@@ -84,7 +87,7 @@ def test_repeated_disabled_motion_sends_zero_keepalive_when_configured(monkeypat
         def from_config(cls, cfg):
             return cls()
 
-        def update(self, state):
+        def update(self, state, arm_states=None):
             return TeleopCommandBatch(motions={"left": MotionCommand.disabled("left")})
 
     arm = FakeArm()
@@ -104,6 +107,67 @@ def test_repeated_disabled_motion_sends_zero_keepalive_when_configured(monkeypat
 
     assert arm.sent_commands == []
     assert arm.stop_count == 4
+
+
+def test_run_passes_arm_states_to_policy(monkeypatch):
+    class FakeDevice:
+        def __init__(self) -> None:
+            self.reads = 0
+
+        def start(self) -> None:
+            pass
+
+        def read(self):
+            self.reads += 1
+            if self.reads > 1:
+                raise KeyboardInterrupt
+            return object()
+
+        def stop(self) -> None:
+            pass
+
+    class FakeArm:
+        def connect(self) -> None:
+            pass
+
+        def get_state(self):
+            return "left-state"
+
+        def send_motion(self, command: MotionCommand) -> None:
+            raise AssertionError("disabled motion should not be sent")
+
+        def stop_motion(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    seen_arm_states = []
+
+    class FakePolicy:
+        @classmethod
+        def from_config(cls, cfg):
+            return cls()
+
+        def update(self, state, arm_states=None):
+            seen_arm_states.append(arm_states)
+            return TeleopCommandBatch(motions={"left": MotionCommand.disabled("left")})
+
+    cfg = {
+        "app": {"dry_run": True, "rate_hz": 1000},
+        "input": {"mock_controller": True},
+        "arms": {"left": {}},
+        "grippers": {},
+        "safety": {"send_zero_when_idle": True},
+    }
+    monkeypatch.setattr(oculus_franka, "_make_device", lambda cfg: FakeDevice())
+    monkeypatch.setattr(oculus_franka, "_make_arms", lambda cfg: {"left": FakeArm()})
+    monkeypatch.setattr(oculus_franka, "_make_grippers", lambda cfg, arms: {})
+    monkeypatch.setattr(oculus_franka, "BimanualClutchPolicy", FakePolicy)
+
+    assert oculus_franka.run(cfg) == 0
+
+    assert seen_arm_states == [{"left": "left-state"}]
 
 
 def test_run_ignores_gripper_command_for_unconfigured_gripper(monkeypatch):
@@ -127,6 +191,9 @@ def test_run_ignores_gripper_command_for_unconfigured_gripper(monkeypatch):
         def connect(self) -> None:
             pass
 
+        def get_state(self):
+            return None
+
         def send_motion(self, command: MotionCommand) -> None:
             pass
 
@@ -141,7 +208,7 @@ def test_run_ignores_gripper_command_for_unconfigured_gripper(monkeypatch):
         def from_config(cls, cfg):
             return cls()
 
-        def update(self, state):
+        def update(self, state, arm_states=None):
             return TeleopCommandBatch(
                 motions={"left": MotionCommand.disabled("left")},
                 grippers={"missing_gripper": GripperCommand("missing_gripper", 0.5)},
