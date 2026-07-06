@@ -36,6 +36,22 @@ def test_build_motion_action_keeps_rotation_and_gripper_slot_zero():
     assert action == [0.01, -0.02, 0.03, 0.0, 0.0, 0.0, 0.0]
 
 
+def test_clip_delta_norm_limits_large_vector_without_changing_direction():
+    module = load_module()
+
+    clipped = module.clip_delta_norm(np.array([0.03, 0.04, 0.0]), 0.025)
+
+    assert np.allclose(clipped, [0.015, 0.02, 0.0])
+
+
+def test_clip_delta_norm_leaves_small_vector_unchanged():
+    module = load_module()
+
+    clipped = module.clip_delta_norm(np.array([0.003, 0.004, 0.0]), 0.02)
+
+    assert np.allclose(clipped, [0.003, 0.004, 0.0])
+
+
 def test_direction_sequence_accepts_all_aliases_and_preserves_order():
     module = load_module()
 

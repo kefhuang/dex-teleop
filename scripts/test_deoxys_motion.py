@@ -61,6 +61,14 @@ def build_direction_deltas(step: float) -> dict[str, np.ndarray]:
     }
 
 
+def clip_delta_norm(delta: np.ndarray, max_norm: float) -> np.ndarray:
+    delta = np.asarray(delta, dtype=float)
+    norm = float(np.linalg.norm(delta))
+    if norm == 0.0 or norm <= float(max_norm):
+        return delta.copy()
+    return delta * (float(max_norm) / norm)
+
+
 def build_motion_action(delta_position: np.ndarray) -> list[float]:
     """Build a 7D OSC_POSE action: xyz, rpy, neutral gripper slot."""
 
@@ -141,6 +149,32 @@ def send_delta(robot: Any, controller_cfg: Any, delta: np.ndarray) -> None:
     )
 
 
+def move_toward_target(
+    robot: Any,
+    controller_cfg: Any,
+    target_pos: np.ndarray,
+    *,
+    max_step: float,
+    tolerance: float,
+    cycles: int,
+) -> tuple[np.ndarray | None, int, float | None]:
+    last_pos: np.ndarray | None = None
+    last_error: float | None = None
+    for cycle in range(1, cycles + 1):
+        current = current_eef_pos(robot)
+        if current is None:
+            time.sleep(0.05)
+            continue
+        last_pos = current
+        remaining = np.asarray(target_pos, dtype=float) - current
+        last_error = float(np.linalg.norm(remaining))
+        if last_error <= tolerance:
+            return current, cycle - 1, last_error
+        command_delta = clip_delta_norm(remaining, max_step)
+        send_delta(robot, controller_cfg, command_delta)
+    return last_pos, cycles, last_error
+
+
 def stop_robot(robot: Any, controller_cfg: Any) -> None:
     robot.control(
         controller_type=CONTROLLER_TYPE,
@@ -183,6 +217,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Seconds to wait for initial robot state. Default: 5.0",
     )
     parser.add_argument(
+        "--cycles",
+        type=int,
+        default=60,
+        help="Max closed-loop control cycles per direction. Default: 60",
+    )
+    parser.add_argument(
+        "--tolerance",
+        type=float,
+        default=0.003,
+        help="Target position tolerance in meters. Default: 0.003",
+    )
+    parser.add_argument(
         "--execute",
         action="store_true",
         help="Actually send control commands. Without this, the script is read-only.",
@@ -205,6 +251,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.settle < 0.0:
         print("[ERROR] --settle must be non-negative", file=sys.stderr)
+        return 2
+    if args.cycles <= 0:
+        print("[ERROR] --cycles must be positive", file=sys.stderr)
+        return 2
+    if args.tolerance <= 0.0:
+        print("[ERROR] --tolerance must be positive", file=sys.stderr)
         return 2
     if args.state_timeout <= 0.0:
         print("[ERROR] --state-timeout must be positive", file=sys.stderr)
@@ -260,19 +312,32 @@ def main(argv: list[str] | None = None) -> int:
 
             before = current_eef_pos(robot)
             print(f"[STATE] before_{direction}={np.round(before, 5).tolist() if before is not None else None}")
-            send_delta(robot, controller_cfg, delta)
+            if before is None:
+                print(f"[WARN] Could not read pose before {direction}")
+                continue
+            target = before + delta
+            after, used_cycles, final_error = move_toward_target(
+                robot,
+                controller_cfg,
+                target,
+                max_step=args.step,
+                tolerance=args.tolerance,
+                cycles=args.cycles,
+            )
             if args.settle:
                 time.sleep(args.settle)
             wait_for_state(robot, timeout=1.0, label=f"after {direction}")
-            after = current_eef_pos(robot)
+            after = current_eef_pos(robot) if after is None else after
             if after is None:
                 print(f"[WARN] Could not read pose after {direction}")
                 previous_pos = after
                 continue
-            measured_delta = after - before if before is not None else after - previous_pos
+            measured_delta = after - before
             print(
-                f"[STATE] after_{direction}={np.round(after, 5).tolist()} "
-                f"measured_delta={np.round(measured_delta, 5).tolist()}"
+                f"[STATE] target_{direction}={np.round(target, 5).tolist()} "
+                f"after_{direction}={np.round(after, 5).tolist()} "
+                f"measured_delta={np.round(measured_delta, 5).tolist()} "
+                f"cycles={used_cycles} final_error={None if final_error is None else round(final_error, 5)}"
             )
             previous_pos = after
 
