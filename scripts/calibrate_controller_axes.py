@@ -15,10 +15,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from dex_teleop.core.config import apply_cli_overrides, load_config
-from dex_teleop.core.types import DeviceState, Pose
+from dex_teleop.core.config import apply_cli_overrides, load_config, resolve_repo_path
+from dex_teleop.core.types import DeviceState, MotionCommand, Pose
 from dex_teleop.devices.mock import MockControllerInput
 from dex_teleop.devices.oculus import OculusDevice
+from dex_teleop.robots.franka import FrankaArmController
+from dex_teleop.robots.mock import MockArmController
 from dex_teleop.utils.transforms import quaternion_delta_rpy
 
 POSITION_OUTPUT_AXES = ("x", "y", "z")
@@ -128,10 +130,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--config", required=True, help="Path to teleop YAML config")
     parser.add_argument("--controller", choices=("left", "right"), required=True)
+    parser.add_argument("--arm", required=True, help="Arm id from config to move as calibration reference")
+    parser.add_argument("--dry-run", dest="dry_run", action="store_true", default=None, help="Use mock robot")
+    parser.add_argument("--real-robot", dest="dry_run", action="store_false", help="Use real robot")
     parser.add_argument("--mock-controller", action="store_true", default=None)
     parser.add_argument("--real-controller", dest="mock_controller", action="store_false")
     parser.add_argument("--samples", type=int, default=5, help="Samples to average for each capture")
     parser.add_argument("--sample-delay", type=float, default=0.02, help="Delay between samples")
+    parser.add_argument("--position-step", type=float, default=0.02, help="Robot reference translation in meters")
+    parser.add_argument("--rotation-step", type=float, default=0.10, help="Robot reference rotation in radians")
+    parser.add_argument("--hold-time", type=float, default=0.8, help="Pause after each robot reference motion")
     parser.add_argument("--min-position-delta", type=float, default=0.02)
     parser.add_argument("--min-rotation-delta", type=float, default=0.15)
     return parser.parse_args(argv)
@@ -172,6 +180,90 @@ def sample_controller_pose(
     )
 
 
+def _make_arm(cfg: dict[str, Any], arm_id: str) -> MockArmController | FrankaArmController:
+    if arm_id not in cfg["arms"]:
+        raise RuntimeError(f"Arm {arm_id!r} is not configured")
+    arm_cfg = cfg["arms"][arm_id]
+    if cfg["app"].get("dry_run", False):
+        return MockArmController(arm_id)
+    if arm_cfg.get("type") != "franka":
+        raise RuntimeError(
+            f"Unsupported real arm type for arm {arm_id!r}: {arm_cfg.get('type')!r}"
+        )
+    interface_cfg = arm_cfg["interface_cfg"]
+    resolved = resolve_repo_path(interface_cfg)
+    if not resolved.exists():
+        raise RuntimeError(
+            f"Real arm {arm_id!r} interface_cfg does not exist: {interface_cfg!r} "
+            f"(resolved to {resolved})"
+        )
+    return FrankaArmController(arm_id, interface_cfg=str(resolved))
+
+
+def _motion_command_for_axis(
+    arm_id: str,
+    *,
+    group: str,
+    axis: str,
+    amount: float,
+) -> MotionCommand:
+    delta_position = np.zeros(3)
+    delta_rotation = np.zeros(3)
+    if group == "position":
+        delta_position[POSITION_OUTPUT_AXES.index(axis)] = amount
+    elif group == "rotation":
+        delta_rotation[ROTATION_OUTPUT_AXES.index(axis)] = amount
+    else:
+        raise ValueError(f"Unsupported motion group {group!r}")
+    return MotionCommand(
+        arm_id=arm_id,
+        delta_position=delta_position,
+        delta_rotation=delta_rotation,
+        enabled=True,
+    )
+
+
+def move_robot_reference(
+    arm: Any,
+    *,
+    axis: str,
+    group: str,
+    amount: float,
+    hold_time: float,
+    sleep_func: Callable[[float], None] = time.sleep,
+) -> None:
+    arm.send_motion(
+        _motion_command_for_axis(
+            arm.arm_id,
+            group=group,
+            axis=axis,
+            amount=amount,
+        )
+    )
+    if hold_time > 0.0:
+        sleep_func(hold_time)
+    arm.stop_motion()
+
+
+def return_robot_reference(
+    arm: Any,
+    *,
+    axis: str,
+    group: str,
+    amount: float,
+    hold_time: float,
+    sleep_func: Callable[[float], None] = time.sleep,
+) -> None:
+    move_robot_reference(
+        arm,
+        axis=axis,
+        group=group,
+        amount=-amount,
+        hold_time=hold_time,
+        sleep_func=sleep_func,
+    )
+
+
 def capture_delta(
     read_state: Callable[[], DeviceState],
     controller: str,
@@ -203,43 +295,92 @@ def capture_delta(
 
 def run_calibration(
     read_state: Callable[[], DeviceState],
+    arm: Any,
     controller: str,
     *,
     samples: int = 5,
     sample_delay: float = 0.02,
+    position_step: float = 0.02,
+    rotation_step: float = 0.10,
+    hold_time: float = 0.8,
     min_position_delta: float = 0.02,
     min_rotation_delta: float = 0.15,
     input_func: Callable[[str], str] = input,
     print_func: Callable[[str], None] = print,
+    sleep_func: Callable[[float], None] = time.sleep,
 ) -> AxisCalibrationResult:
     position_deltas: dict[str, np.ndarray] = {}
     rotation_deltas: dict[str, np.ndarray] = {}
 
-    print_func("Position calibration: move the controller in the direction that should move the robot along each positive axis.")
+    print_func(
+        "Position calibration: the robot moves first; imitate that direction with the controller."
+    )
     for axis in POSITION_OUTPUT_AXES:
-        position_delta, _ = capture_delta(
-            read_state,
-            controller,
-            prompt=f"Calibrate robot +{axis}: move controller in desired robot +{axis} direction.",
-            samples=samples,
-            sample_delay=sample_delay,
-            input_func=input_func,
+        input_func(f"\nPress Enter to move robot +{axis} by {position_step:.3f} m.")
+        move_robot_reference(
+            arm,
+            axis=axis,
+            group="position",
+            amount=position_step,
+            hold_time=hold_time,
+            sleep_func=sleep_func,
         )
-        position_deltas[axis] = position_delta
-        print_func(f"robot +{axis}: raw controller position delta {np.round(position_delta, 5).tolist()}")
+        try:
+            position_delta, _ = capture_delta(
+                read_state,
+                controller,
+                prompt=f"Now imitate the robot +{axis} movement with the controller.",
+                samples=samples,
+                sample_delay=sample_delay,
+                input_func=input_func,
+            )
+            position_deltas[axis] = position_delta
+            print_func(f"robot +{axis}: raw controller position delta {np.round(position_delta, 5).tolist()}")
+        finally:
+            input_func(f"Press Enter to return robot -{axis} to the start pose.")
+            return_robot_reference(
+                arm,
+                axis=axis,
+                group="position",
+                amount=position_step,
+                hold_time=hold_time,
+                sleep_func=sleep_func,
+            )
 
-    print_func("Rotation calibration: rotate the controller in the direction that should rotate the robot along each positive RPY axis.")
+    print_func(
+        "Rotation calibration: the robot rotates first; imitate that rotation with the controller."
+    )
     for axis in ROTATION_OUTPUT_AXES:
-        _, rotation_delta = capture_delta(
-            read_state,
-            controller,
-            prompt=f"Calibrate robot +{axis}: rotate controller in desired robot +{axis} direction.",
-            samples=samples,
-            sample_delay=sample_delay,
-            input_func=input_func,
+        input_func(f"\nPress Enter to rotate robot +{axis} by {rotation_step:.3f} rad.")
+        move_robot_reference(
+            arm,
+            axis=axis,
+            group="rotation",
+            amount=rotation_step,
+            hold_time=hold_time,
+            sleep_func=sleep_func,
         )
-        rotation_deltas[axis] = rotation_delta
-        print_func(f"robot +{axis}: raw controller rotation delta {np.round(rotation_delta, 5).tolist()}")
+        try:
+            _, rotation_delta = capture_delta(
+                read_state,
+                controller,
+                prompt=f"Now imitate the robot +{axis} rotation with the controller.",
+                samples=samples,
+                sample_delay=sample_delay,
+                input_func=input_func,
+            )
+            rotation_deltas[axis] = rotation_delta
+            print_func(f"robot +{axis}: raw controller rotation delta {np.round(rotation_delta, 5).tolist()}")
+        finally:
+            input_func(f"Press Enter to return robot -{axis} to the start pose.")
+            return_robot_reference(
+                arm,
+                axis=axis,
+                group="rotation",
+                amount=rotation_step,
+                hold_time=hold_time,
+                sleep_func=sleep_func,
+            )
 
     position_axes, rotation_axes = run_calibration_from_deltas(
         position_deltas=position_deltas,
@@ -255,15 +396,25 @@ def run_calibration(
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     cfg = load_config(args.config)
-    cfg = apply_cli_overrides(cfg, mock_controller=args.mock_controller)
+    cfg = apply_cli_overrides(
+        cfg,
+        dry_run=args.dry_run,
+        mock_controller=args.mock_controller,
+    )
     device = _make_device(cfg)
+    arm = _make_arm(cfg, args.arm)
     try:
         device.start()
+        arm.connect()
         run_calibration(
             device.read,
+            arm,
             args.controller,
             samples=args.samples,
             sample_delay=args.sample_delay,
+            position_step=args.position_step,
+            rotation_step=args.rotation_step,
+            hold_time=args.hold_time,
             min_position_delta=args.min_position_delta,
             min_rotation_delta=args.min_rotation_delta,
         )
@@ -271,6 +422,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Calibration error: {exc}")
         return 2
     finally:
+        try:
+            arm.stop_motion()
+        except Exception:
+            pass
+        arm.close()
         device.stop()
     return 0
 

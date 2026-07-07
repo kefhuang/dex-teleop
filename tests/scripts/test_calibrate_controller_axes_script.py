@@ -134,6 +134,7 @@ def test_run_calibration_guides_position_then_rotation_and_prints_yaml():
 
     result = run_calibration(
         lambda: next(states),
+        FakeArm(),
         "left",
         samples=1,
         sample_delay=0.0,
@@ -141,6 +142,7 @@ def test_run_calibration_guides_position_then_rotation_and_prints_yaml():
         min_rotation_delta=0.05,
         input_func=lambda prompt: "",
         print_func=output.append,
+        sleep_func=lambda seconds: None,
     )
 
     assert result.position_axes == {"x": "+z", "y": "-x", "z": "+y"}
@@ -158,3 +160,91 @@ def test_script_help_runs_when_invoked_by_path():
 
     assert result.returncode == 0
     assert "Guided Oculus controller axis calibration" in result.stdout
+
+
+class FakeArm:
+    def __init__(self) -> None:
+        self.arm_id = "left"
+        self.motion_commands = []
+        self.stop_count = 0
+
+    def send_motion(self, command) -> None:
+        self.motion_commands.append(command)
+
+    def stop_motion(self) -> None:
+        self.stop_count += 1
+
+
+def test_run_calibration_moves_robot_axis_before_controller_match_and_returns_to_start():
+    from scripts.calibrate_controller_axes import run_calibration
+
+    arm = FakeArm()
+    states = iter(
+        [
+            _state_with_pose([0.0, 0.0, 0.0]),
+            _state_with_pose([0.0, 0.0, 0.04]),
+            _state_with_pose([0.0, 0.0, 0.0]),
+            _state_with_pose([-0.03, 0.0, 0.0]),
+            _state_with_pose([0.0, 0.0, 0.0]),
+            _state_with_pose([0.0, 0.02, 0.0]),
+            _state_with_pose([0.0, 0.0, 0.0]),
+            _state_with_pose([0.0, 0.0, 0.0]),
+            _state_with_pose([0.0, 0.0, 0.0]),
+            _state_with_pose([0.0, 0.0, 0.0]),
+            _state_with_pose([0.0, 0.0, 0.0]),
+            _state_with_pose([0.0, 0.0, 0.0]),
+        ]
+    )
+
+    run_calibration(
+        lambda: next(states),
+        arm,
+        "left",
+        samples=1,
+        sample_delay=0.0,
+        position_step=0.02,
+        rotation_step=0.1,
+        min_position_delta=0.01,
+        min_rotation_delta=0.0,
+        input_func=lambda prompt: "",
+        print_func=lambda text: None,
+        sleep_func=lambda seconds: None,
+    )
+
+    assert len(arm.motion_commands) == 12
+    assert np.allclose(arm.motion_commands[0].delta_position, [0.02, 0.0, 0.0])
+    assert np.allclose(arm.motion_commands[1].delta_position, [-0.02, 0.0, 0.0])
+    assert np.allclose(arm.motion_commands[2].delta_position, [0.0, 0.02, 0.0])
+    assert np.allclose(arm.motion_commands[3].delta_position, [0.0, -0.02, 0.0])
+    assert np.allclose(arm.motion_commands[4].delta_position, [0.0, 0.0, 0.02])
+    assert np.allclose(arm.motion_commands[5].delta_position, [0.0, 0.0, -0.02])
+    assert np.allclose(arm.motion_commands[6].delta_rotation, [0.1, 0.0, 0.0])
+    assert np.allclose(arm.motion_commands[7].delta_rotation, [-0.1, 0.0, 0.0])
+    assert arm.stop_count == 12
+
+
+def test_run_calibration_returns_robot_to_start_if_controller_capture_fails():
+    from scripts.calibrate_controller_axes import run_calibration
+
+    arm = FakeArm()
+
+    def fail_read():
+        raise RuntimeError("controller lost")
+
+    with pytest.raises(RuntimeError, match="controller lost"):
+        run_calibration(
+            fail_read,
+            arm,
+            "left",
+            samples=1,
+            sample_delay=0.0,
+            position_step=0.02,
+            rotation_step=0.1,
+            input_func=lambda prompt: "",
+            print_func=lambda text: None,
+            sleep_func=lambda seconds: None,
+        )
+
+    assert len(arm.motion_commands) == 2
+    assert np.allclose(arm.motion_commands[0].delta_position, [0.02, 0.0, 0.0])
+    assert np.allclose(arm.motion_commands[1].delta_position, [-0.02, 0.0, 0.0])
