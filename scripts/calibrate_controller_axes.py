@@ -200,23 +200,41 @@ def _make_arm(cfg: dict[str, Any], arm_id: str) -> MockArmController | FrankaArm
     return FrankaArmController(arm_id, interface_cfg=str(resolved))
 
 
+def _action_scale_for_group(arm: Any, group: str) -> float:
+    controller_cfg = getattr(arm, "controller_cfg", None)
+    action_scale = getattr(controller_cfg, "action_scale", None)
+    if action_scale is None:
+        return 1.0
+    if group == "position":
+        scale = getattr(action_scale, "translation", 1.0)
+    elif group == "rotation":
+        scale = getattr(action_scale, "rotation", 1.0)
+    else:
+        raise ValueError(f"Unsupported motion group {group!r}")
+    scale = float(scale)
+    if scale <= 0.0:
+        raise AxisCalibrationError(f"Invalid Deoxys {group} action scale: {scale}")
+    return scale
+
+
 def _motion_command_for_axis(
-    arm_id: str,
+    arm: Any,
     *,
     group: str,
     axis: str,
     amount: float,
 ) -> MotionCommand:
+    command_amount = float(amount) / _action_scale_for_group(arm, group)
     delta_position = np.zeros(3)
     delta_rotation = np.zeros(3)
     if group == "position":
-        delta_position[POSITION_OUTPUT_AXES.index(axis)] = amount
+        delta_position[POSITION_OUTPUT_AXES.index(axis)] = command_amount
     elif group == "rotation":
-        delta_rotation[ROTATION_OUTPUT_AXES.index(axis)] = amount
+        delta_rotation[ROTATION_OUTPUT_AXES.index(axis)] = command_amount
     else:
         raise ValueError(f"Unsupported motion group {group!r}")
     return MotionCommand(
-        arm_id=arm_id,
+        arm_id=arm.arm_id,
         delta_position=delta_position,
         delta_rotation=delta_rotation,
         enabled=True,
@@ -234,7 +252,7 @@ def move_robot_reference(
 ) -> None:
     arm.send_motion(
         _motion_command_for_axis(
-            arm.arm_id,
+            arm,
             group=group,
             axis=axis,
             amount=amount,

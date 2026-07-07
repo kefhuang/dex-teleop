@@ -51,7 +51,7 @@ The defaults are intentionally small:
 - `--rotation-step 0.10` radians
 - `--hold-time 0.8` seconds
 
-The script sends one bounded `MotionCommand` for the reference move, stops the robot, captures controller motion, then sends the opposite `MotionCommand` to return. If controller capture fails after a reference move, the return command still runs in a `finally` block.
+The script sends one `MotionCommand` for the reference move, compensating for Deoxys `action_scale` so `--position-step` and `--rotation-step` are interpreted as robot-frame meters/radians. It then stops the robot, captures controller motion, and sends the opposite `MotionCommand` to return. If controller capture fails after a reference move, the return command still runs in a `finally` block.
 
 ## Scope
 

@@ -248,3 +248,39 @@ def test_run_calibration_returns_robot_to_start_if_controller_capture_fails():
     assert len(arm.motion_commands) == 2
     assert np.allclose(arm.motion_commands[0].delta_position, [0.02, 0.0, 0.0])
     assert np.allclose(arm.motion_commands[1].delta_position, [-0.02, 0.0, 0.0])
+
+
+class FakeScaledArm(FakeArm):
+    def __init__(self) -> None:
+        super().__init__()
+        self.controller_cfg = type(
+            "ControllerCfg",
+            (),
+            {"action_scale": type("ActionScale", (), {"translation": 0.05, "rotation": 2.0})()},
+        )()
+
+
+def test_robot_reference_motion_inverts_deoxys_action_scale():
+    from scripts.calibrate_controller_axes import move_robot_reference
+
+    arm = FakeScaledArm()
+
+    move_robot_reference(
+        arm,
+        axis="x",
+        group="position",
+        amount=0.02,
+        hold_time=0.0,
+        sleep_func=lambda seconds: None,
+    )
+    move_robot_reference(
+        arm,
+        axis="roll",
+        group="rotation",
+        amount=0.10,
+        hold_time=0.0,
+        sleep_func=lambda seconds: None,
+    )
+
+    assert np.allclose(arm.motion_commands[0].delta_position, [0.4, 0.0, 0.0])
+    assert np.allclose(arm.motion_commands[1].delta_rotation, [0.05, 0.0, 0.0])
