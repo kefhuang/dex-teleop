@@ -287,14 +287,16 @@ ik_joint_position:
   max_target_joint_jump_rad: 0.20
   max_joint_velocity_rad_s: 0.50
   max_joint_acceleration_rad_s2: 1.00
+  max_dt_s: 0.10
   joint_limit_margin_rad: 0.05
 ```
 
 Scalar joint velocity and acceleration limits apply to all seven joints in
 the initial configuration. The parser may also accept a seven-element list so
 future tuning does not require a schema change. Values must be finite and
-strictly positive, except that no zero-valued motion limit is needed for this
-strategy.
+strictly positive. `max_dt_s` caps the elapsed time used by command shaping
+after a delayed application cycle. No zero-valued motion limit is needed for
+this strategy.
 
 The config reuses the existing `mapping`, `scales`, `controls`, input, arm,
 gripper, and safety sections. The new strategy continues to emit gripper
