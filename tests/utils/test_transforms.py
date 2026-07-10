@@ -10,7 +10,12 @@ from dex_teleop.utils.transforms import (
     axis_mapping,
     clamp_vector_norm,
     limit_components,
+    quaternion_delta_rotation_vector,
     quaternion_delta_rpy,
+    quaternion_xyzw_to_matrix,
+    rotation_error_angle,
+    rotation_matrix_to_quaternion_xyzw,
+    rotation_vector_to_matrix,
 )
 
 
@@ -140,3 +145,22 @@ def test_quaternion_delta_rpy_reports_positive_yaw():
     )
 
     assert np.allclose(delta, np.array([0.0, 0.0, math.pi / 2.0]))
+
+
+def test_quaternion_delta_rotation_vector_uses_shortest_yaw_branch():
+    angle = -math.pi / 2.0
+    current = np.array([0.0, 0.0, math.sin(angle / 2.0), math.cos(angle / 2.0)])
+    result = quaternion_delta_rotation_vector(
+        np.array([0.0, 0.0, 0.0, 1.0]), current
+    )
+    np.testing.assert_allclose(result, [0.0, 0.0, angle], atol=1e-8)
+
+
+def test_rotation_vector_matrix_quaternion_round_trip():
+    vector = np.array([0.2, -0.3, 0.4])
+    rotation = rotation_vector_to_matrix(vector)
+    quaternion = rotation_matrix_to_quaternion_xyzw(rotation)
+    np.testing.assert_allclose(
+        quaternion_xyzw_to_matrix(quaternion), rotation, atol=1e-8
+    )
+    assert rotation_error_angle(rotation, rotation) == pytest.approx(0.0, abs=1e-8)

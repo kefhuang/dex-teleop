@@ -98,10 +98,100 @@ def _normalize_quat(q: np.ndarray) -> np.ndarray:
     values = np.asarray(q, dtype=float)
     if values.shape != (4,):
         raise ValueError(f"quaternion must have shape (4,), got {values.shape}")
+    if not np.all(np.isfinite(values)):
+        raise ValueError("quaternion must contain only finite values")
     norm = float(np.linalg.norm(values))
     if norm == 0.0:
         raise ValueError("Quaternion norm cannot be zero")
     return values / norm
+
+
+def quaternion_xyzw_to_matrix(q: np.ndarray) -> np.ndarray:
+    """Convert a normalized xyzw quaternion representation to a rotation matrix."""
+    x, y, z, w = _normalize_quat(q)
+    return np.array(
+        [
+            [1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y - z * w), 2.0 * (x * z + y * w)],
+            [2.0 * (x * y + z * w), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z - x * w)],
+            [2.0 * (x * z - y * w), 2.0 * (y * z + x * w), 1.0 - 2.0 * (x * x + y * y)],
+        ],
+        dtype=float,
+    )
+
+
+def rotation_matrix_to_quaternion_xyzw(rotation: np.ndarray) -> np.ndarray:
+    """Convert a finite shape-(3, 3) rotation matrix to an xyzw quaternion."""
+    rot = np.asarray(rotation, dtype=float)
+    if rot.shape != (3, 3) or not np.all(np.isfinite(rot)):
+        raise ValueError("rotation matrix must be a finite shape-(3, 3) matrix")
+
+    trace = float(np.trace(rot))
+    if trace > 0.0:
+        scale = 2.0 * math.sqrt(trace + 1.0)
+        w = 0.25 * scale
+        x = (rot[2, 1] - rot[1, 2]) / scale
+        y = (rot[0, 2] - rot[2, 0]) / scale
+        z = (rot[1, 0] - rot[0, 1]) / scale
+    elif rot[0, 0] > rot[1, 1] and rot[0, 0] > rot[2, 2]:
+        scale = 2.0 * math.sqrt(1.0 + rot[0, 0] - rot[1, 1] - rot[2, 2])
+        w = (rot[2, 1] - rot[1, 2]) / scale
+        x = 0.25 * scale
+        y = (rot[0, 1] + rot[1, 0]) / scale
+        z = (rot[0, 2] + rot[2, 0]) / scale
+    elif rot[1, 1] > rot[2, 2]:
+        scale = 2.0 * math.sqrt(1.0 + rot[1, 1] - rot[0, 0] - rot[2, 2])
+        w = (rot[0, 2] - rot[2, 0]) / scale
+        x = (rot[0, 1] + rot[1, 0]) / scale
+        y = 0.25 * scale
+        z = (rot[1, 2] + rot[2, 1]) / scale
+    else:
+        scale = 2.0 * math.sqrt(1.0 + rot[2, 2] - rot[0, 0] - rot[1, 1])
+        w = (rot[1, 0] - rot[0, 1]) / scale
+        x = (rot[0, 2] + rot[2, 0]) / scale
+        y = (rot[1, 2] + rot[2, 1]) / scale
+        z = 0.25 * scale
+
+    return _normalize_quat(np.array([x, y, z, w], dtype=float))
+
+
+def quaternion_delta_rotation_vector(
+    anchor_xyzw: np.ndarray, current_xyzw: np.ndarray
+) -> np.ndarray:
+    """Return the shortest rotation vector from anchor to current."""
+    anchor = _normalize_quat(anchor_xyzw)
+    current = _normalize_quat(current_xyzw)
+    delta = _normalize_quat(_quat_multiply(current, _quat_conjugate(anchor)))
+    if delta[3] < 0.0:
+        delta = -delta
+    vector_norm = float(np.linalg.norm(delta[:3]))
+    if vector_norm < 1e-12:
+        return np.zeros(3)
+    angle = 2.0 * math.atan2(vector_norm, float(delta[3]))
+    return delta[:3] * (angle / vector_norm)
+
+
+def rotation_vector_to_matrix(vector: np.ndarray) -> np.ndarray:
+    """Convert a finite rotation vector to a rotation matrix with Rodrigues' formula."""
+    values = np.asarray(vector, dtype=float)
+    if values.shape != (3,) or not np.all(np.isfinite(values)):
+        raise ValueError("rotation vector must be a finite shape-(3,) vector")
+    angle = float(np.linalg.norm(values))
+    if angle < 1e-12:
+        return np.eye(3)
+    x, y, z = values / angle
+    skew = np.array([[0.0, -z, y], [z, 0.0, -x], [-y, x, 0.0]])
+    return (
+        np.eye(3)
+        + math.sin(angle) * skew
+        + (1.0 - math.cos(angle)) * (skew @ skew)
+    )
+
+
+def rotation_error_angle(target: np.ndarray, actual: np.ndarray) -> float:
+    """Return the unsigned angular error between two rotation matrices."""
+    relative = np.asarray(target, dtype=float) @ np.asarray(actual, dtype=float).T
+    cosine = np.clip((np.trace(relative) - 1.0) / 2.0, -1.0, 1.0)
+    return float(math.acos(float(cosine)))
 
 
 def _quat_to_rpy(q_xyzw: np.ndarray) -> np.ndarray:
