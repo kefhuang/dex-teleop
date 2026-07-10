@@ -8,6 +8,7 @@ import numpy as np
 
 
 _JOINT_COUNT = 7
+_HARD_MAX_DT_S = 0.10
 
 
 def _joint_vector(values: Any, name: str) -> np.ndarray:
@@ -94,7 +95,7 @@ class JointSetpointLimiter:
         if np.any(lower_vector > upper_vector):
             raise ValueError("lower_limits must not exceed upper_limits")
 
-        effective_dt = min(dt_s, self.max_dt_s)
+        effective_dt = min(dt_s, self.max_dt_s, _HARD_MAX_DT_S)
         error = target_vector - self._q_cmd
         desired_dq = np.clip(
             error / effective_dt, -self.max_velocity, self.max_velocity

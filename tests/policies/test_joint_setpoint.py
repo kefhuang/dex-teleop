@@ -54,6 +54,21 @@ def test_limiter_caps_delayed_dt_and_stops_exactly_at_target():
     np.testing.assert_allclose(dq_cmd, np.zeros(JOINT_COUNT))
 
 
+def test_limiter_enforces_hard_dt_ceiling_above_configured_cap():
+    limiter = JointSetpointLimiter(1.0, 1.0, 1.0)
+    limiter.reset(np.zeros(JOINT_COUNT))
+
+    q_cmd, dq_cmd = limiter.step(
+        np.ones(JOINT_COUNT),
+        dt=1.0,
+        lower_limits=LOWER_LIMITS,
+        upper_limits=UPPER_LIMITS,
+    )
+
+    np.testing.assert_allclose(q_cmd, np.ones(JOINT_COUNT) * 0.01)
+    np.testing.assert_allclose(dq_cmd, np.ones(JOINT_COUNT) * 0.1)
+
+
 def test_limiter_does_not_overshoot_when_braking_from_existing_velocity():
     limiter = JointSetpointLimiter(1.0, 10.0, 0.1)
     limiter.reset(np.zeros(JOINT_COUNT))
