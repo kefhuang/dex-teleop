@@ -1,22 +1,31 @@
 from __future__ import annotations
 
+from enum import Enum
 from typing import Protocol
+import numpy as np
+from dex_teleop.core.types import ArmState, Pose, Twist
 
-from dex_teleop.core.types import ArmState, MotionCommand
+
+class ArmMotionState(str, Enum):
+    """Top-level motion intent, independent of a robot backend session."""
+
+    STREAMING = "streaming"
+    HOLDING = "holding"
 
 
-class ArmController(Protocol):
-    def connect(self) -> None:
-        pass
-
-    def get_state(self) -> ArmState:
-        pass
-
-    def send_motion(self, command: MotionCommand) -> None:
-        pass
-
-    def stop_motion(self) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
+class Arm(Protocol):
+    @property
+    def dof(self) -> int: ...
+    @property
+    def motion_state(self) -> ArmMotionState: ...
+    @property
+    def is_settled(self) -> bool: ...
+    def connect(self) -> None: ...
+    def get_state(self) -> ArmState: ...
+    def home(self, *, dt: float) -> None: ...
+    def joint_position(self, positions: np.ndarray, *, dt: float) -> None: ...
+    def joint_velocity(self, velocities: np.ndarray, *, dt: float) -> None: ...
+    def joint_impedance(self, positions: np.ndarray, *, dt: float) -> None: ...
+    def ik_joint_position(self, pose: Pose, *, twist_ref: Twist | None = None, delta: bool = False, dt: float) -> None: ...
+    def ik_joint_velocity(self, twist: Twist, *, dt: float) -> None: ...
+    def stop(self) -> None: ...

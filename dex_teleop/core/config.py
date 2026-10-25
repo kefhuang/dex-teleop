@@ -17,20 +17,15 @@ REQUIRED_TOP_LEVEL = (
     "controls",
     "arms",
     "grippers",
-    "mapping",
     "scales",
     "safety",
 )
 
 REQUIRED_CONTROLS = ("clutch_button", "gripper_axis")
-REQUIRED_MAPPING = ("position_axes", "rotation_axes")
 REQUIRED_SCALES = ("position", "rotation")
 REQUIRED_SAFETY = (
-    "max_translation_per_cycle",
-    "max_rotation_per_cycle",
-    "position_deadzone",
-    "rotation_deadzone",
-    "send_zero_when_idle",
+    "max_translation_from_anchor_m",
+    "max_rotation_from_anchor_rad",
 )
 
 
@@ -65,19 +60,14 @@ def _validate(cfg: dict[str, Any]) -> None:
     controls = _require_mapping(cfg["controls"], "controls")
     arms = _require_mapping(cfg["arms"], "arms")
     grippers = _require_mapping(cfg["grippers"], "grippers")
-    mapping = _require_mapping(cfg["mapping"], "mapping")
     scales = _require_mapping(cfg["scales"], "scales")
     safety = _require_mapping(cfg["safety"], "safety")
 
     _validate_required_keys(app, ("rate_hz", "dry_run"), "app")
     _validate_required_keys(input_cfg, ("type", "mock_controller"), "input")
     _validate_required_keys(controls, REQUIRED_CONTROLS, "controls")
-    _validate_required_keys(mapping, REQUIRED_MAPPING, "mapping")
     _validate_required_keys(scales, REQUIRED_SCALES, "scales")
     _validate_required_keys(safety, REQUIRED_SAFETY, "safety")
-
-    _require_mapping(mapping["position_axes"], "mapping.position_axes")
-    _require_mapping(mapping["rotation_axes"], "mapping.rotation_axes")
 
     for arm_id, arm_cfg_value in arms.items():
         arm_path = f"arms.{arm_id}"

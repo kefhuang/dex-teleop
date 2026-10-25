@@ -29,8 +29,8 @@ The intended dependency flow is:
 ```text
 OculusDevice
   -> DeviceState
-  -> app + clutch mapping
-  -> target Pose or Twist
+  -> app + fixed-action binding or clutch mapping
+  -> HOME intent, target Pose, or Twist
   -> Robot.arm
   -> robot-specific IK and safety shaping
   -> Deoxys or another robot backend
@@ -60,10 +60,15 @@ When the arm and end effector share a backend connection, a robot-specific inter
 class Arm(Protocol):
     @property
     def dof(self) -> int: ...
+    @property
+    def motion_state(self) -> ArmMotionState: ...
+    @property
+    def is_settled(self) -> bool: ...
 
     def connect(self) -> None: ...
     def get_state(self) -> ArmState: ...
 
+    def home(self, *, dt: float) -> None: ...
     def joint_position(self, positions: np.ndarray, *, dt: float) -> None: ...
     def joint_velocity(self, velocities: np.ndarray, *, dt: float) -> None: ...
     def joint_impedance(self, positions: np.ndarray, *, dt: float) -> None: ...
@@ -87,6 +92,18 @@ All pose and twist values are expressed in the robot base frame:
 - `ik_joint_position(..., delta=True)` accepts a base-frame pose increment relative to the current measured end-effector pose.
 - `ik_joint_velocity()` accepts a base-frame end-effector twist in metres per second and radians per second.
 - End-effector-local deltas are intentionally unsupported.
+
+`home()` is a fixed action whose joint target belongs to each concrete robot
+implementation. It follows the same state validation, limit enforcement, and
+rate shaping as `joint_position()`; applications do not carry robot joint
+constants.
+
+`motion_state` describes top-level intent and has only `STREAMING` and
+`HOLDING`. Stopping control immediately enters `HOLDING` with one immutable
+joint-position target; backend velocity, acceleration, and jerk limits still
+make the physical transition continuous. `is_settled` separately reports
+whether the reference, backend desired velocity, and measured arm have
+converged to that target.
 
 All public methods validate and safely shape their commands. No public raw-send bypass is provided.
 
@@ -152,7 +169,16 @@ class ArmState:
     joint_velocities: np.ndarray
     end_effector_pose: Pose
     timestamp: float
+
+class ControllerAction(str, Enum):
+    HOME = "HOME"
 ```
+
+`ControllerAction` is input intent carried in `ControllerState`, not an
+executable robot command wrapper. Device adapters translate hardware bindings
+into this fixed vocabulary. The Oculus adapter maps left X and right A to
+`HOME`; the application latches a rising edge and calls the corresponding
+`robot.arm.home()` until `robot.arm.is_settled` is true.
 
 Units are metres, seconds, radians, metres per second, and radians per second. Quaternions use XYZW order.
 

@@ -11,5 +11,6 @@ venv/
 
 # Logs/artifacts
 *.log
+logs/*.jsonl
 runs/
 outputs/

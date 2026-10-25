@@ -1,0 +1,38 @@
+app:
+  rate_hz: 20
+  dry_run: true
+
+input:
+  type: oculus
+  mock_controller: true
+  ip: null
+  port: 5555
+  stale_timeout: 0.15
+
+controls:
+  clutch_button: grip
+  gripper_axis: trigger
+
+arms:
+  right:
+    type: franka
+    interface_cfg: dependency/deoxys_control/deoxys/config/franka-three.yml
+    state_timeout: 0.2
+    max_dt: 0.1
+    controller: right
+    gripper: right_gripper
+
+grippers:
+  right_gripper:
+    type: franka
+    arm: right
+    open_width: 0.08
+    close_width: 0.0
+
+scales:
+  position: 0.8
+  rotation: 0.8
+
+safety:
+  max_translation_from_anchor_m: 0.25
+  max_rotation_from_anchor_rad: 0.75

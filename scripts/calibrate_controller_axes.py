@@ -16,12 +16,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from dex_teleop.core.config import apply_cli_overrides, load_config, resolve_repo_path
-from dex_teleop.core.types import DeviceState, MotionCommand, Pose
+from dex_teleop.core.types import DeviceState, Pose
 from dex_teleop.devices.mock import MockControllerInput
 from dex_teleop.devices.oculus import OculusDevice
-from dex_teleop.robots.franka import FrankaArmController
-from dex_teleop.robots.mock import MockArmController
-from dex_teleop.utils.transforms import quaternion_delta_rpy
+from dex_teleop.robots.franka import make_franka_robot
+from dex_teleop.robots.mock import MockArm
+from dex_teleop.robots.robot import Robot
+from dex_teleop.utils.transforms import quaternion_delta_rpy, rotation_matrix_to_quaternion_xyzw, rotation_vector_to_matrix
 
 POSITION_OUTPUT_AXES = ("x", "y", "z")
 POSITION_INPUT_AXES = ("x", "y", "z")
@@ -107,7 +108,7 @@ def format_mapping_yaml(position_axes: Mapping[str, str], rotation_axes: Mapping
 
 
 def _snapshot_pose(pose: Pose) -> Pose:
-    return Pose(position=pose.position.copy(), orientation=pose.orientation.copy())
+    return Pose(position=pose.position.copy(), quaternion_xyzw=pose.quaternion_xyzw.copy())
 
 
 def read_controller_pose(state: DeviceState, controller: str) -> Pose:
@@ -176,16 +177,16 @@ def sample_controller_pose(
             time.sleep(sample_delay)
     return Pose(
         position=np.mean([pose.position for pose in poses], axis=0),
-        orientation=_average_quaternion_xyzw([pose.orientation for pose in poses]),
+        quaternion_xyzw=_average_quaternion_xyzw([pose.quaternion_xyzw for pose in poses]),
     )
 
 
-def _make_arm(cfg: dict[str, Any], arm_id: str) -> MockArmController | FrankaArmController:
+def _make_robot(cfg: dict[str, Any], arm_id: str) -> Robot:
     if arm_id not in cfg["arms"]:
         raise RuntimeError(f"Arm {arm_id!r} is not configured")
     arm_cfg = cfg["arms"][arm_id]
     if cfg["app"].get("dry_run", False):
-        return MockArmController(arm_id)
+        return Robot(MockArm())
     if arm_cfg.get("type") != "franka":
         raise RuntimeError(
             f"Unsupported real arm type for arm {arm_id!r}: {arm_cfg.get('type')!r}"
@@ -197,24 +198,7 @@ def _make_arm(cfg: dict[str, Any], arm_id: str) -> MockArmController | FrankaArm
             f"Real arm {arm_id!r} interface_cfg does not exist: {interface_cfg!r} "
             f"(resolved to {resolved})"
         )
-    return FrankaArmController(arm_id, interface_cfg=str(resolved))
-
-
-def _action_scale_for_group(arm: Any, group: str) -> float:
-    controller_cfg = getattr(arm, "controller_cfg", None)
-    action_scale = getattr(controller_cfg, "action_scale", None)
-    if action_scale is None:
-        return 1.0
-    if group == "position":
-        scale = getattr(action_scale, "translation", 1.0)
-    elif group == "rotation":
-        scale = getattr(action_scale, "rotation", 1.0)
-    else:
-        raise ValueError(f"Unsupported motion group {group!r}")
-    scale = float(scale)
-    if scale <= 0.0:
-        raise AxisCalibrationError(f"Invalid Deoxys {group} action scale: {scale}")
-    return scale
+    return make_franka_robot(str(resolved), with_gripper=False)
 
 
 def _motion_command_for_axis(
@@ -223,8 +207,8 @@ def _motion_command_for_axis(
     group: str,
     axis: str,
     amount: float,
-) -> MotionCommand:
-    command_amount = float(amount) / _action_scale_for_group(arm, group)
+) -> Pose:
+    command_amount = float(amount)
     delta_position = np.zeros(3)
     delta_rotation = np.zeros(3)
     if group == "position":
@@ -233,12 +217,7 @@ def _motion_command_for_axis(
         delta_rotation[ROTATION_OUTPUT_AXES.index(axis)] = command_amount
     else:
         raise ValueError(f"Unsupported motion group {group!r}")
-    return MotionCommand(
-        arm_id=arm.arm_id,
-        delta_position=delta_position,
-        delta_rotation=delta_rotation,
-        enabled=True,
-    )
+    return Pose(delta_position, rotation_matrix_to_quaternion_xyzw(rotation_vector_to_matrix(delta_rotation)))
 
 
 def move_robot_reference(
@@ -250,17 +229,17 @@ def move_robot_reference(
     hold_time: float,
     sleep_func: Callable[[float], None] = time.sleep,
 ) -> None:
-    arm.send_motion(
+    arm.ik_joint_position(
         _motion_command_for_axis(
             arm,
             group=group,
             axis=axis,
             amount=amount,
-        )
+        ), delta=True, dt=max(float(hold_time), 0.05)
     )
     if hold_time > 0.0:
         sleep_func(hold_time)
-    arm.stop_motion()
+    arm.stop()
 
 
 def return_robot_reference(
@@ -307,7 +286,7 @@ def capture_delta(
     )
     return (
         end.position - start.position,
-        quaternion_delta_rpy(start.orientation, end.orientation),
+        quaternion_delta_rpy(start.quaternion_xyzw, end.quaternion_xyzw),
     )
 
 
@@ -420,10 +399,11 @@ def main(argv: list[str] | None = None) -> int:
         mock_controller=args.mock_controller,
     )
     device = _make_device(cfg)
-    arm = _make_arm(cfg, args.arm)
+    robot = _make_robot(cfg, args.arm)
+    arm = robot.arm
     try:
         device.start()
-        arm.connect()
+        robot.connect()
         run_calibration(
             device.read,
             arm,
@@ -441,10 +421,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     finally:
         try:
-            arm.stop_motion()
+            arm.stop()
         except Exception:
             pass
-        arm.close()
+        robot.close()
         device.stop()
     return 0
 

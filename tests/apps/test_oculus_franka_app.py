@@ -1,483 +1,267 @@
-from __future__ import annotations
+import json
 
-from pathlib import Path
+import numpy as np
 
-import pytest
+import dex_teleop.apps.oculus_franka as app_module
+from dex_teleop.apps.oculus_franka import _make_robots, main, parse_args, run
+from dex_teleop.core.config import load_config
+from dex_teleop.core.types import ControllerAction, ControllerState, DeviceState, Pose, Twist
+from dex_teleop.diagnostics import ControlTracer
+from dex_teleop.robots import MockArm, MockGripper
+from dex_teleop.robots.arm import ArmMotionState
+from dex_teleop.robots.robot import Robot
 
-from dex_teleop.apps import oculus_franka
-from dex_teleop.apps.oculus_franka import main
-from dex_teleop.core.types import GripperCommand, MotionCommand, TeleopCommandBatch
+def test_dry_run_factory_builds_robot_composition():
+    robots=_make_robots(load_config('configs/oculus_franka_right.yml'))
+    assert isinstance(robots['right'].arm,MockArm)
+    assert isinstance(robots['right'].end_effector,MockGripper)
 
+def test_dry_run_control_loop_smoke():
+    cfg=load_config('configs/oculus_franka_right.yml')
+    assert run(cfg,duration=.01)==0
 
-def test_app_dry_run_mock_controller_smoke(capsys):
-    code = main(
-        [
-            "--config",
-            "configs/oculus_franka_bimanual.yml",
-            "--mock-controller",
-            "--dry-run",
-            "--duration",
-            "0.2",
-            "--rate-hz",
-            "30",
-        ]
-    )
+def test_visualizer_receives_device_samples_and_is_closed():
+    class FakeVisualizer:
+        def __init__(self):
+            self.states=[]
+            self.closed=False
 
-    captured = capsys.readouterr()
-    assert code == 0
-    assert "dry_run=True" in captured.out
-    assert "mock_controller=True" in captured.out
-    assert "Teleop shutdown complete" in captured.out
+        def update(self,state):
+            self.states.append(state)
 
+        def close(self):
+            self.closed=True
 
-def test_app_missing_config_returns_config_error(capsys):
-    code = main(
-        [
-            "--config",
-            "configs/does-not-exist.yml",
-            "--mock-controller",
-            "--dry-run",
-        ]
-    )
+    cfg=load_config('configs/oculus_franka_right.yml')
+    cfg['app']['rate_hz']=1000
+    visualizer=FakeVisualizer()
 
-    captured = capsys.readouterr()
-    assert code == 2
-    assert "Config error" in captured.out
+    assert run(cfg,duration=.005,visualizer=visualizer)==0
+    assert visualizer.states
+    assert set(visualizer.states[0].controllers)=={'left','right'}
+    assert visualizer.closed
 
+def test_parse_args_accepts_controller_visualization_flag():
+    args=parse_args([
+        '--config','configs/oculus_franka_right.yml',
+        '--visualize-controllers',
+    ])
 
-def test_repeated_disabled_motion_sends_zero_keepalive_when_configured(monkeypatch):
+    assert args.visualize_controllers is True
+
+def test_main_reports_missing_config():
+    assert main(['--config','does-not-exist.yml'])==2
+
+def test_control_trace_captures_complete_mock_control_path(tmp_path):
+    cfg=load_config('configs/oculus_franka_right.yml')
+    cfg['app']['rate_hz']=1000
+    path=tmp_path/'control-trace.jsonl'
+    tracer=ControlTracer(path)
+    try:
+        assert run(cfg,duration=.02,tracer=tracer)==0
+    finally:
+        tracer.close()
+
+    records=[json.loads(line) for line in path.read_text().splitlines()]
+    cycles=[record for record in records if record['record_type']=='control_cycle']
+    events=[event for cycle in cycles for event in cycle['events']]
+    names={event['name'] for event in events}
+
+    assert len(cycles)>=3
+    assert 'device.read.result' in names
+    assert 'mock.arm.state.result' in names
+    assert 'teleop.clutch.target_built' in names
+    assert 'mock.arm.ik_joint_position.solved' in names
+    assert 'mock.arm.command.executed' in names
+    assert 'mock.gripper.position.executed' in names
+    command=next(event for event in events if event['name']=='mock.arm.command.executed')
+    assert command['scope']['arm_id']=='right'
+    assert len(command['data']['joint_positions'])==7
+
+def test_main_record_trace_option_writes_session_lifecycle(tmp_path):
+    path=tmp_path/'cli-trace.jsonl'
+    result=main([
+        '--config','configs/oculus_franka_right.yml',
+        '--rate-hz','1000',
+        '--duration','.005',
+        '--record-trace',str(path),
+    ])
+
+    assert result==0
+    records=[json.loads(line) for line in path.read_text().splitlines()]
+    event_names=[record.get('name') for record in records if record['record_type']=='event']
+    assert 'session.start' in event_names
+    assert 'session.end' in event_names
+    assert any(record['record_type']=='control_cycle' for record in records)
+
+def test_real_oculus_filter_cutoff_stays_below_robot_loop_nyquist(monkeypatch):
+    captured={}
+    class FakeOculus:
+        def __init__(self,**kwargs): captured.update(kwargs)
+    monkeypatch.setattr(app_module,'OculusDevice',FakeOculus)
+    cfg=load_config('configs/oculus_franka_right.yml')
+    cfg['input']['mock_controller']=False
+    cfg['app']['rate_hz']=8.0
+
+    app_module._make_device(cfg)
+
+    assert captured['velocity_cutoff_hz']==3.6
+
+def test_control_loop_passes_zero_then_mapped_controller_twist(monkeypatch):
+    raw_twist=Twist([1,2,3],[.1,.2,.3])
     class FakeDevice:
-        def __init__(self) -> None:
-            self.reads = 0
-
-        def start(self) -> None:
-            pass
-
+        def __init__(self): self.step=0
+        def start(self): pass
         def read(self):
-            self.reads += 1
-            if self.reads > 3:
-                raise KeyboardInterrupt
-            return object()
+            self.step+=1
+            calibrating=self.step==1
+            controller=ControllerState(
+                'right',Pose.identity(),buttons={'grip':not calibrating},
+                twist=raw_twist,timestamp=float(self.step),
+                actions=(
+                    {ControllerAction.CALIBRATE} if calibrating else set()
+                ),
+                pointer_direction=[0,0,1],
+            )
+            return DeviceState(float(self.step),{'right':controller})
+        def stop(self): pass
+    class SpyArm(MockArm):
+        def __init__(self):
+            super().__init__(); self.twist_references=[]
+        def ik_joint_position(self,pose,*,twist_ref=None,delta=False,dt):
+            self.twist_references.append(twist_ref)
+            return super().ik_joint_position(
+                pose,twist_ref=twist_ref,delta=delta,dt=dt
+            )
+    arm=SpyArm(); robot=Robot(arm,None)
+    monkeypatch.setattr(app_module,'_make_device',lambda _cfg:FakeDevice())
+    monkeypatch.setattr(app_module,'_make_robots',lambda _cfg:{'right':robot})
+    cfg=load_config('configs/oculus_franka_right.yml')
+    cfg['app']['rate_hz']=1000.0
+    cfg['scales']['rotation']=.3
 
-        def stop(self) -> None:
-            pass
+    assert app_module.run(cfg,duration=.006)==0
 
-    class FakeArm:
-        def __init__(self) -> None:
-            self.stop_count = 0
-            self.sent_commands: list[MotionCommand] = []
+    assert len(arm.twist_references)>=2
+    np.testing.assert_allclose(arm.twist_references[0].linear,0.0)
+    np.testing.assert_allclose(arm.twist_references[0].angular,0.0)
+    np.testing.assert_allclose(arm.twist_references[1].linear,[2.4,.8,1.6])
+    np.testing.assert_allclose(arm.twist_references[1].angular,[.09,.03,.06])
 
-        def connect(self) -> None:
-            pass
-
-        def get_state(self):
-            return None
-
-        def send_motion(self, command: MotionCommand) -> None:
-            self.sent_commands.append(command)
-
-        def stop_motion(self) -> None:
-            self.stop_count += 1
-
-        def close(self) -> None:
-            pass
-
-    class FakePolicy:
-        @classmethod
-        def from_config(cls, cfg):
-            return cls()
-
-        def update(self, state, arm_states=None):
-            return TeleopCommandBatch(motions={"left": MotionCommand.disabled("left")})
-
-    arm = FakeArm()
-    cfg = {
-        "app": {"dry_run": True, "rate_hz": 1000},
-        "input": {"mock_controller": True},
-        "arms": {"left": {}},
-        "grippers": {},
-        "safety": {"send_zero_when_idle": True},
-    }
-    monkeypatch.setattr(oculus_franka, "_make_device", lambda cfg: FakeDevice())
-    monkeypatch.setattr(oculus_franka, "_make_arms", lambda cfg: {"left": arm})
-    monkeypatch.setattr(oculus_franka, "_make_grippers", lambda cfg, arms: {})
-    monkeypatch.setattr(oculus_franka, "BimanualClutchPolicy", FakePolicy)
-
-    assert oculus_franka.run(cfg) == 0
-
-    assert arm.sent_commands == []
-    assert arm.stop_count == 4
-
-
-def test_run_passes_arm_states_to_policy(monkeypatch):
+def test_left_y_and_right_b_calibrate_only_their_bound_arms(monkeypatch):
     class FakeDevice:
-        def __init__(self) -> None:
-            self.reads = 0
-
-        def start(self) -> None:
-            pass
-
+        def __init__(self): self.step=0
+        def start(self): pass
         def read(self):
-            self.reads += 1
-            if self.reads > 1:
-                raise KeyboardInterrupt
-            return object()
-
-        def stop(self) -> None:
-            pass
-
-    class FakeArm:
-        def connect(self) -> None:
-            pass
-
-        def get_state(self):
-            return "left-state"
-
-        def send_motion(self, command: MotionCommand) -> None:
-            raise AssertionError("disabled motion should not be sent")
-
-        def stop_motion(self) -> None:
-            pass
-
-        def close(self) -> None:
-            pass
-
-    seen_arm_states = []
-
-    class FakePolicy:
-        @classmethod
-        def from_config(cls, cfg):
-            return cls()
-
-        def update(self, state, arm_states=None):
-            seen_arm_states.append(arm_states)
-            return TeleopCommandBatch(motions={"left": MotionCommand.disabled("left")})
-
-    cfg = {
-        "app": {"dry_run": True, "rate_hz": 1000},
-        "input": {"mock_controller": True},
-        "arms": {"left": {}},
-        "grippers": {},
-        "safety": {"send_zero_when_idle": True},
-    }
-    monkeypatch.setattr(oculus_franka, "_make_device", lambda cfg: FakeDevice())
-    monkeypatch.setattr(oculus_franka, "_make_arms", lambda cfg: {"left": FakeArm()})
-    monkeypatch.setattr(oculus_franka, "_make_grippers", lambda cfg, arms: {})
-    monkeypatch.setattr(oculus_franka, "BimanualClutchPolicy", FakePolicy)
-
-    assert oculus_franka.run(cfg) == 0
-
-    assert seen_arm_states == [{"left": "left-state"}]
-
-
-def test_run_ignores_gripper_command_for_unconfigured_gripper(monkeypatch):
-    class FakeDevice:
-        def __init__(self) -> None:
-            self.reads = 0
-
-        def start(self) -> None:
-            pass
-
-        def read(self):
-            self.reads += 1
-            if self.reads > 1:
-                raise KeyboardInterrupt
-            return object()
-
-        def stop(self) -> None:
-            pass
-
-    class FakeArm:
-        def connect(self) -> None:
-            pass
-
-        def get_state(self):
-            return None
-
-        def send_motion(self, command: MotionCommand) -> None:
-            pass
-
-        def stop_motion(self) -> None:
-            pass
-
-        def close(self) -> None:
-            pass
-
-    class FakePolicy:
-        @classmethod
-        def from_config(cls, cfg):
-            return cls()
-
-        def update(self, state, arm_states=None):
-            return TeleopCommandBatch(
-                motions={"left": MotionCommand.disabled("left")},
-                grippers={"missing_gripper": GripperCommand("missing_gripper", 0.5)},
+            self.step+=1
+            left_calibrating=self.step==1
+            right_calibrating=self.step==3
+            left=ControllerState(
+                'left',Pose.identity(),
+                buttons={'grip':self.step in {2} or self.step>=4},
+                actions=(
+                    {ControllerAction.CALIBRATE}
+                    if left_calibrating else set()
+                ),
+                pointer_direction=[0,0,1],
+            )
+            right=ControllerState(
+                'right',Pose.identity(),
+                buttons={'grip':self.step==2 or self.step>=4},
+                actions=(
+                    {ControllerAction.CALIBRATE}
+                    if right_calibrating else set()
+                ),
+                pointer_direction=[0,0,-1],
+            )
+            return DeviceState(
+                float(self.step),{'left':left,'right':right}
+            )
+        def stop(self): pass
+    class SpyArm(MockArm):
+        def __init__(self,device):
+            super().__init__(); self.device=device; self.ik_steps=[]
+        def ik_joint_position(self,pose,*,twist_ref=None,delta=False,dt):
+            self.ik_steps.append(self.device.step)
+            return super().ik_joint_position(
+                pose,twist_ref=twist_ref,delta=delta,dt=dt
             )
 
-    cfg = {
-        "app": {"dry_run": True, "rate_hz": 1000},
-        "input": {"mock_controller": True},
-        "arms": {"left": {"gripper": None}},
-        "grippers": {},
+    device=FakeDevice()
+    left_arm=SpyArm(device); right_arm=SpyArm(device)
+    robots={
+        'left':Robot(left_arm,None),
+        'right':Robot(right_arm,None),
     }
-    monkeypatch.setattr(oculus_franka, "_make_device", lambda cfg: FakeDevice())
-    monkeypatch.setattr(oculus_franka, "_make_arms", lambda cfg: {"left": FakeArm()})
-    monkeypatch.setattr(oculus_franka, "_make_grippers", lambda cfg, arms: {})
-    monkeypatch.setattr(oculus_franka, "BimanualClutchPolicy", FakePolicy)
+    monkeypatch.setattr(app_module,'_make_device',lambda _cfg:device)
+    monkeypatch.setattr(app_module,'_make_robots',lambda _cfg:robots)
+    cfg=load_config('configs/oculus_franka_bimanual.yml')
+    cfg['app']['rate_hz']=1000.0
 
-    assert oculus_franka.run(cfg) == 0
+    assert app_module.run(cfg,duration=.01)==0
 
+    assert 2 in left_arm.ik_steps
+    assert 2 not in right_arm.ik_steps
+    assert min(right_arm.ik_steps)>=4
 
-def test_real_app_connects_arms_before_creating_grippers(monkeypatch):
-    events: list[str] = []
-
+def test_home_action_latches_after_button_release_and_preempts_clutch(monkeypatch):
     class FakeDevice:
-        def start(self) -> None:
-            events.append("device.start")
-
+        def __init__(self): self.step=0
+        def start(self): pass
         def read(self):
-            raise KeyboardInterrupt
+            self.step+=1
+            actions=(
+                {ControllerAction.HOME}
+                if self.step==1
+                else set()
+            )
+            controller=ControllerState(
+                'right',Pose.identity(),buttons={'grip':True},actions=actions,
+                timestamp=float(self.step),
+            )
+            return DeviceState(float(self.step),{'right':controller})
+        def stop(self): pass
+    class SpyArm(MockArm):
+        def __init__(self):
+            super().__init__(); self.home_calls=0; self.ik_calls=0
+        def home(self,*,dt):
+            self.home_calls+=1
+            self._motion_state=ArmMotionState.STREAMING
+            self._is_settled=False
+        def ik_joint_position(self,pose,*,twist_ref=None,delta=False,dt):
+            self.ik_calls+=1
+    arm=SpyArm(); robot=Robot(arm,None)
+    monkeypatch.setattr(app_module,'_make_device',lambda _cfg:FakeDevice())
+    monkeypatch.setattr(app_module,'_make_robots',lambda _cfg:{'right':robot})
+    cfg=load_config('configs/oculus_franka_right.yml')
+    cfg['app']['rate_hz']=1000.0
 
-        def stop(self) -> None:
-            events.append("device.stop")
+    assert app_module.run(cfg,duration=.006)==0
 
-    class FakeArm:
-        def __init__(self, arm_id: str, interface_cfg: str) -> None:
-            self.arm_id = arm_id
-            self.interface_cfg = interface_cfg
-            self.interface = None
+    assert arm.home_calls>=2
+    assert arm.ik_calls==0
 
-        def connect(self) -> None:
-            events.append(f"{self.arm_id}.connect")
-            self.interface = {"arm_id": self.arm_id}
-
-        def stop_motion(self) -> None:
-            events.append(f"{self.arm_id}.stop")
-
-        def close(self) -> None:
-            events.append(f"{self.arm_id}.close")
-
-    class FakeGripper:
-        def __init__(self, gripper_id: str, *, interface) -> None:
-            events.append(f"{gripper_id}.created")
-            assert interface == {"arm_id": "left"}
-            self.gripper_id = gripper_id
-            self.interface = interface
-
-        def connect(self) -> None:
-            events.append(f"{self.gripper_id}.connect")
-
-        def send_gripper(self, command) -> None:
-            raise AssertionError("loop should stop before commands are sent")
-
-        def close(self) -> None:
-            events.append(f"{self.gripper_id}.close")
-
-    class FakePolicy:
-        @classmethod
-        def from_config(cls, cfg):
-            return cls()
-
-        def update(self, state):
-            raise AssertionError("device read interrupts before policy update")
-
-    cfg = {
-        "app": {"dry_run": False, "rate_hz": 1000},
-        "input": {"mock_controller": True},
-        "arms": {
-            "left": {
-                "type": "franka",
-                "interface_cfg": "dependency/deoxys_control/deoxys/config/franka-two.yml",
-            }
-        },
-        "grippers": {"left_gripper": {"type": "franka", "arm": "left"}},
-    }
-    monkeypatch.setattr(oculus_franka, "_make_device", lambda cfg: FakeDevice())
-    monkeypatch.setattr(oculus_franka, "FrankaArmController", FakeArm)
-    monkeypatch.setattr(oculus_franka, "FrankaGripperController", FakeGripper)
-    monkeypatch.setattr(oculus_franka, "BimanualClutchPolicy", FakePolicy)
-
-    assert oculus_franka.run(cfg) == 0
-
-    assert events.index("left.connect") < events.index("left_gripper.created")
-
-
-def test_dry_run_make_grippers_uses_mock_grippers_without_arm_interface():
-    class FakeArmWithoutInterface:
-        interface = None
-
-    cfg = {
-        "app": {"dry_run": True},
-        "grippers": {"left_gripper": {"arm": "left"}},
-    }
-
-    grippers = oculus_franka._make_grippers(cfg, {"left": FakeArmWithoutInterface()})
-
-    assert isinstance(grippers["left_gripper"], oculus_franka.MockGripperController)
-
-
-def test_real_run_missing_interface_cfg_fails_before_franka_construction(monkeypatch):
-    constructed: list[str] = []
-    started: list[str] = []
-
+def test_held_home_action_triggers_only_once_after_completion(monkeypatch):
     class FakeDevice:
-        def start(self) -> None:
-            started.append("device.start")
-
-        def stop(self) -> None:
-            started.append("device.stop")
-
-    def fail_if_franka_constructed(arm_id: str, interface_cfg: str):
-        constructed.append(f"{arm_id}:{interface_cfg}")
-        raise AssertionError("FrankaArmController should not be constructed")
-
-    cfg = {
-        "app": {"dry_run": False, "rate_hz": 1000},
-        "input": {"mock_controller": True},
-        "arms": {
-            "left": {
-                "type": "franka",
-                "interface_cfg": "configs/does-not-exist-franka.yml",
-            }
-        },
-        "grippers": {"left_gripper": {"type": "franka", "arm": "left"}},
-    }
-    monkeypatch.setattr(oculus_franka, "_make_device", lambda cfg: FakeDevice())
-    monkeypatch.setattr(oculus_franka, "FrankaArmController", fail_if_franka_constructed)
-
-    with pytest.raises(RuntimeError) as excinfo:
-        oculus_franka.run(cfg)
-
-    message = str(excinfo.value)
-    assert "interface_cfg" in message
-    assert "does not exist" in message
-    assert "configs/does-not-exist-franka.yml" in message
-    assert str(Path("configs/does-not-exist-franka.yml")) in message
-    assert constructed == []
-    assert started == []
-
-
-def test_real_run_rejects_unsupported_arm_and_gripper_types():
-    cfg = {
-        "app": {"dry_run": False, "rate_hz": 1000},
-        "input": {"mock_controller": True},
-        "arms": {
-            "left": {
-                "type": "mock",
-                "interface_cfg": "dependency/deoxys_control/deoxys/config/franka-two.yml",
-            }
-        },
-        "grippers": {"left_gripper": {"type": "mock", "arm": "left"}},
-    }
-
-    with pytest.raises(RuntimeError) as excinfo:
-        oculus_franka.run(cfg)
-
-    message = str(excinfo.value)
-    assert "Unsupported real arm type" in message
-    assert "left" in message
-    assert "franka" in message
-
-
-def test_real_oculus_startup_error_mentions_adb_quest_or_mock_controller(
-    monkeypatch, capsys
-):
-    class FailingDevice:
-        def start(self) -> None:
-            raise RuntimeError("oculus unavailable")
-
-        def stop(self) -> None:
-            pass
-
-    monkeypatch.setattr(oculus_franka, "_make_device", lambda cfg: FailingDevice())
-
-    code = main(
-        [
-            "--config",
-            "configs/oculus_franka_bimanual.yml",
-            "--real-robot",
-            "--real-controller",
-            "--duration",
-            "0.01",
-        ]
-    )
-
-    captured = capsys.readouterr()
-    assert code == 1
-    assert "Teleop error" in captured.out
-    assert (
-        "--mock-controller" in captured.out
-        or "ADB" in captured.out
-        or "Quest" in captured.out
-    )
-
-
-def test_real_franka_connect_error_mentions_manually_started_deoxys_backend(
-    monkeypatch, capsys
-):
-    class FakeDevice:
-        def start(self) -> None:
-            pass
-
+        def start(self): pass
         def read(self):
-            raise AssertionError("loop should not run after Franka connect failure")
+            controller=ControllerState(
+                'right',Pose.identity(),actions={ControllerAction.HOME}
+            )
+            return DeviceState(1.0,{'right':controller})
+        def stop(self): pass
+    class SpyArm(MockArm):
+        def __init__(self): super().__init__(); self.home_calls=0
+        def home(self,*,dt):
+            self.home_calls+=1
+            self._motion_state=ArmMotionState.HOLDING
+            self._is_settled=True
+    arm=SpyArm(); robot=Robot(arm,None)
+    monkeypatch.setattr(app_module,'_make_device',lambda _cfg:FakeDevice())
+    monkeypatch.setattr(app_module,'_make_robots',lambda _cfg:{'right':robot})
+    cfg=load_config('configs/oculus_franka_right.yml')
+    cfg['app']['rate_hz']=1000.0
 
-        def stop(self) -> None:
-            pass
+    assert app_module.run(cfg,duration=.006)==0
 
-    class FailingArm:
-        def __init__(self, arm_id: str, interface_cfg: str) -> None:
-            self.arm_id = arm_id
-            self.interface_cfg = interface_cfg
-            self.interface = None
-
-        def connect(self) -> None:
-            raise RuntimeError("cannot reach robot")
-
-        def stop_motion(self) -> None:
-            pass
-
-        def close(self) -> None:
-            pass
-
-    monkeypatch.setattr(oculus_franka, "_make_device", lambda cfg: FakeDevice())
-    monkeypatch.setattr(oculus_franka, "FrankaArmController", FailingArm)
-
-    code = main(
-        [
-            "--config",
-            "configs/oculus_franka_bimanual.yml",
-            "--real-robot",
-            "--mock-controller",
-            "--duration",
-            "0.01",
-        ]
-    )
-
-    captured = capsys.readouterr()
-    assert code == 1
-    assert "Teleop error" in captured.out
-    assert "Deoxys backend" in captured.out
-    assert "manually started" in captured.out
-
-
-def test_app_print_commands_outputs_dry_run_commands(capsys):
-    code = main(
-        [
-            "--config",
-            "configs/oculus_franka_bimanual.yml",
-            "--mock-controller",
-            "--dry-run",
-            "--duration",
-            "0.2",
-            "--rate-hz",
-            "30",
-            "--print-commands",
-        ]
-    )
-
-    captured = capsys.readouterr()
-    assert code == 0
-    assert "controllers=" in captured.out
-    assert "motion[left]" in captured.out
-    assert "gripper[left_gripper]" in captured.out
+    assert arm.home_calls==1

@@ -1,16 +1,14 @@
-from __future__ import annotations
-
 from typing import Protocol
+import numpy as np
+from dex_teleop.core.types import EndEffectorState
 
-from dex_teleop.core.types import GripperCommand
+class EndEffector(Protocol):
+    def connect(self) -> None: ...
+    def get_state(self) -> EndEffectorState: ...
+    def stop(self) -> None: ...
 
+class Gripper(EndEffector, Protocol):
+    def position(self, normalized: float) -> None: ...
 
-class GripperController(Protocol):
-    def connect(self) -> None:
-        pass
-
-    def send_gripper(self, command: GripperCommand) -> None:
-        pass
-
-    def close(self) -> None:
-        pass
+class DexterousHand(EndEffector, Protocol):
+    def joint_position(self, positions: np.ndarray) -> None: ...

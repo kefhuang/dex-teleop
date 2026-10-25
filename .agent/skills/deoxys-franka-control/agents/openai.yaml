@@ -1,0 +1,4 @@
+interface:
+  display_name: "Deoxys Franka Control"
+  short_description: "Debug and choose Deoxys Franka control modes safely."
+  default_prompt: "Debug or choose a Deoxys Franka control method in this repo."
