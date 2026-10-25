@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import os
-import sys
 from dataclasses import dataclass
-from pathlib import Path
 
 import mujoco
 import numpy as np
@@ -17,23 +15,6 @@ from dex_teleop.utils.transforms import (
 
 
 os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
-
-
-def _deoxys_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "dependency" / "deoxys_control" / "deoxys"
-
-
-def _ensure_deoxys_on_path() -> None:
-    try:
-        __import__("deoxys")
-        return
-    except ModuleNotFoundError:
-        pass
-
-    root = _deoxys_root()
-    root_str = str(root)
-    if root.exists() and root_str not in sys.path:
-        sys.path.insert(0, root_str)
 
 
 def _finite_joints(joint_positions: np.ndarray) -> np.ndarray:
@@ -69,7 +50,6 @@ class PoseIKSolution:
 
 class MujocoPoseIKSolver:
     def __init__(self) -> None:
-        _ensure_deoxys_on_path()
         from deoxys.utils.ik_utils import IKWrapper
 
         self.wrapper = IKWrapper()

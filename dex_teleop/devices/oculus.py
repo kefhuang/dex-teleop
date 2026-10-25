@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import sys
 import time
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -10,12 +8,8 @@ import numpy as np
 from dex_teleop.core.types import ControllerState, DeviceState, Pose
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-OCULUS_READER_ROOT = REPO_ROOT / "dependency" / "oculus_reader"
-
-
 class OculusDevice:
-    """Thin adapter around the vendored Oculus Reader package."""
+    """Thin adapter around the editable-installed shared Oculus Reader package."""
 
     def __init__(self, *, ip: str | None = None, port: int = 5555, print_fps: bool = False) -> None:
         self.ip = ip
@@ -24,12 +18,6 @@ class OculusDevice:
         self._reader: Any | None = None
 
     def start(self) -> None:
-        if not OCULUS_READER_ROOT.exists():
-            raise RuntimeError(f"Missing Oculus Reader dependency: {OCULUS_READER_ROOT}")
-        reader_root = str(OCULUS_READER_ROOT)
-        if reader_root not in sys.path:
-            sys.path.insert(0, reader_root)
-
         from oculus_reader.reader import OculusReader  # noqa: PLC0415
 
         self._reader = OculusReader(

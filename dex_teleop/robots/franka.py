@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import os
-import sys
-from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -20,7 +18,6 @@ def _send_no_control(interface: Any) -> None:
         interface.send_no_control()
         return
 
-    _ensure_deoxys_on_path()
     from deoxys.proto.franka_interface import franka_controller_pb2
 
     dummy_msg = franka_controller_pb2.FrankaDummyControllerMessage()
@@ -39,25 +36,7 @@ def _send_no_control(interface: Any) -> None:
 os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
 
 
-def _deoxys_root() -> Path:
-    return Path(__file__).resolve().parents[2] / "dependency" / "deoxys_control" / "deoxys"
-
-
-def _ensure_deoxys_on_path() -> None:
-    try:
-        __import__("deoxys")
-        return
-    except ModuleNotFoundError:
-        pass
-
-    root = _deoxys_root()
-    root_str = str(root)
-    if root.exists() and root_str not in sys.path:
-        sys.path.insert(0, root_str)
-
-
 def _create_franka_interface(interface_cfg: str) -> Any:
-    _ensure_deoxys_on_path()
     from deoxys.franka_interface import FrankaInterface
 
     return FrankaInterface(
@@ -68,7 +47,6 @@ def _create_franka_interface(interface_cfg: str) -> Any:
 
 
 def _load_controller_config(controller_type: str) -> Any:
-    _ensure_deoxys_on_path()
     from deoxys.utils.config_utils import get_default_controller_config
 
     return get_default_controller_config(controller_type)

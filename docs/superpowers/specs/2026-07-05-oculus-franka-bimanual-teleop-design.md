@@ -193,12 +193,12 @@ Bindings are explicit in config, not hardcoded.
 arms:
   left:
     type: franka
-    interface_cfg: dependency/deoxys_control/deoxys/config/franka-two.yml
+    interface_cfg: ~/Robots/franka/deoxys_control/deoxys/config/franka-two.yml
     controller: left
     gripper: left_gripper
   right:
     type: franka
-    interface_cfg: dependency/deoxys_control/deoxys/config/franka-three.yml
+    interface_cfg: ~/Robots/franka/deoxys_control/deoxys/config/franka-three.yml
     controller: right
     gripper: right_gripper
 ```
@@ -267,12 +267,12 @@ controls:
 arms:
   left:
     type: franka
-    interface_cfg: dependency/deoxys_control/deoxys/config/franka-two.yml
+    interface_cfg: ~/Robots/franka/deoxys_control/deoxys/config/franka-two.yml
     controller: left
     gripper: left_gripper
   right:
     type: franka
-    interface_cfg: dependency/deoxys_control/deoxys/config/franka-three.yml
+    interface_cfg: ~/Robots/franka/deoxys_control/deoxys/config/franka-three.yml
     controller: right
     gripper: right_gripper
 

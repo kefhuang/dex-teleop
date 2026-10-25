@@ -54,15 +54,15 @@ not permanently improve backend diagnostics.
 
 ## Components and Files
 
-- `dependency/deoxys_control/deoxys/franka-interface/include/utils/control_exception_utils.h`
+- `~/Robots/franka/deoxys_control/deoxys/franka-interface/include/utils/control_exception_utils.h`
   will contain the hardware-independent exception-capture helper and its result
   type.
-- `dependency/deoxys_control/deoxys/franka-interface/src/franka_control_node.cpp`
+- `~/Robots/franka/deoxys_control/deoxys/franka-interface/src/franka_control_node.cpp`
   will use the helper around `robot.control()` and route failures through the
   existing orderly shutdown path.
-- `dependency/deoxys_control/deoxys/franka-interface/src/test/test_control_exception_utils.cpp`
+- `~/Robots/franka/deoxys_control/deoxys/franka-interface/src/test/test_control_exception_utils.cpp`
   will exercise the helper without connecting to a robot.
-- `dependency/deoxys_control/deoxys/CMakeLists.txt` will add the standalone
+- `~/Robots/franka/deoxys_control/deoxys/CMakeLists.txt` will add the standalone
   diagnostic test executable.
 
 ## Error Handling

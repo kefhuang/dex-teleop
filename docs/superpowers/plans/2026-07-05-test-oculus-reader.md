@@ -4,9 +4,9 @@
 
 **Goal:** Add a small diagnostic script that verifies whether the Oculus Reader dependency can import, connect to ADB/Oculus, and receive controller transforms/buttons.
 
-**Architecture:** Create one standalone script under `scripts/` that adds the vendored `dependency/oculus_reader` package to `sys.path`, checks `adb devices`, starts `OculusReader`, samples data for a bounded duration, prints summaries, and exits non-zero if no data arrives. The script should support USB by default and network mode via `--ip`/`--port`.
+**Architecture:** Create one standalone script under `scripts/` that adds the vendored `~/Robots/quest/oculus_reader` package to `sys.path`, checks `adb devices`, starts `OculusReader`, samples data for a bounded duration, prints summaries, and exits non-zero if no data arrives. The script should support USB by default and network mode via `--ip`/`--port`.
 
-**Tech Stack:** Python 3.10, existing `dependency/oculus_reader`, `adb`, conda env `dex-teleop`.
+**Tech Stack:** Python 3.10, existing `~/Robots/quest/oculus_reader`, `adb`, conda env `dex-teleop`.
 
 ---
 

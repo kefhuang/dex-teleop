@@ -6,7 +6,7 @@
 
 **Architecture:** Implement a small interface-first framework: core typed commands/config, input adapters, robot/gripper adapters, a bimanual clutch policy, and one app entry point. Keep real hardware adapters thin over vendored Oculus Reader and Deoxys while making all policy/config logic testable without hardware.
 
-**Tech Stack:** Python 3.10, dataclasses, Protocol typing, NumPy, PyYAML, pytest, vendored `dependency/oculus_reader`, vendored `dependency/deoxys_control`.
+**Tech Stack:** Python 3.10, dataclasses, Protocol typing, NumPy, PyYAML, pytest, vendored `~/Robots/quest/oculus_reader`, vendored `~/Robots/franka/deoxys_control`.
 
 ---
 
@@ -744,12 +744,12 @@ controls:
 arms:
   left:
     type: franka
-    interface_cfg: dependency/deoxys_control/deoxys/config/franka-two.yml
+    interface_cfg: ~/Robots/franka/deoxys_control/deoxys/config/franka-two.yml
     controller: left
     gripper: left_gripper
   right:
     type: franka
-    interface_cfg: dependency/deoxys_control/deoxys/config/franka-three.yml
+    interface_cfg: ~/Robots/franka/deoxys_control/deoxys/config/franka-three.yml
     controller: right
     gripper: right_gripper
 
@@ -1207,7 +1207,7 @@ from dex_teleop.core.types import ControllerState, DeviceState, Pose
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-OCULUS_READER_ROOT = REPO_ROOT / "dependency" / "oculus_reader"
+OCULUS_READER_ROOT = Path.home() / "Robots" / "quest" / "oculus_reader"
 
 
 class OculusDevice:
@@ -1540,7 +1540,7 @@ from dex_teleop.core.types import ArmState, GripperCommand, MotionCommand, Pose
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEOXYS_ROOT = REPO_ROOT / "dependency" / "deoxys_control" / "deoxys"
+DEOXYS_ROOT = Path.home() / "Robots" / "franka" / "deoxys_control" / "deoxys"
 
 
 class FrankaArmController:

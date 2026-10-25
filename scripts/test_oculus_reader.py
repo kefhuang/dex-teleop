@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Quick diagnostic for the vendored Oculus Reader.
+"""Quick diagnostic for the shared Oculus Reader.
 
 This script checks whether the Oculus/Quest reader can connect through ADB and
 receive controller transforms/buttons from the headset app.
@@ -16,13 +16,9 @@ from pathlib import Path
 from typing import Any
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-OCULUS_READER_ROOT = REPO_ROOT / "dependency" / "oculus_reader"
-
-
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Test whether dependency/oculus_reader can read Quest controller data.",
+        description="Test whether shared oculus_reader can read Quest controller data.",
     )
     parser.add_argument(
         "--ip",
@@ -98,10 +94,6 @@ def run_adb_devices() -> bool:
 
 
 def import_oculus_reader() -> type[Any]:
-    if not OCULUS_READER_ROOT.exists():
-        raise FileNotFoundError(f"Missing Oculus Reader dependency: {OCULUS_READER_ROOT}")
-
-    sys.path.insert(0, str(OCULUS_READER_ROOT))
     from oculus_reader.reader import OculusReader  # noqa: PLC0415
 
     return OculusReader

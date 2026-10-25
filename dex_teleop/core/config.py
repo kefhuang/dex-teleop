@@ -170,7 +170,7 @@ def apply_cli_overrides(
 def resolve_repo_path(path: str | Path, repo_root: str | Path | None = None) -> Path:
     """Resolve a config path relative to the repository root unless absolute."""
 
-    candidate = Path(path)
+    candidate = Path(path).expanduser()
     if candidate.is_absolute():
         return candidate
     root = Path(repo_root) if repo_root is not None else Path(__file__).resolve().parents[2]

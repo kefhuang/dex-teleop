@@ -287,7 +287,7 @@ def test_real_app_connects_arms_before_creating_grippers(monkeypatch):
         "arms": {
             "left": {
                 "type": "franka",
-                "interface_cfg": "dependency/deoxys_control/deoxys/config/franka-two.yml",
+                "interface_cfg": "~/Robots/franka/deoxys_control/deoxys/config/franka-two.yml",
             }
         },
         "grippers": {"left_gripper": {"type": "franka", "arm": "left"}},
@@ -364,7 +364,7 @@ def test_real_run_rejects_unsupported_arm_and_gripper_types():
         "arms": {
             "left": {
                 "type": "mock",
-                "interface_cfg": "dependency/deoxys_control/deoxys/config/franka-two.yml",
+                "interface_cfg": "~/Robots/franka/deoxys_control/deoxys/config/franka-two.yml",
             }
         },
         "grippers": {"left_gripper": {"type": "mock", "arm": "left"}},

@@ -21,7 +21,9 @@ from typing import Any
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEOXYS_ROOT = REPO_ROOT / "dependency" / "deoxys_control" / "deoxys"
+import deoxys
+
+DEOXYS_ROOT = Path(deoxys.__file__).resolve().parents[1]
 DEFAULT_CONFIG = "franka-three.yml"
 CONTROLLER_TYPE = "OSC_POSE"
 MAX_STEP_METERS = 0.02
@@ -101,9 +103,6 @@ def resolve_config(config: str) -> Path:
 
 
 def import_deoxys() -> tuple[type[Any], Any]:
-    if not DEOXYS_ROOT.exists():
-        raise FileNotFoundError(f"Missing Deoxys dependency: {DEOXYS_ROOT}")
-    sys.path.insert(0, str(DEOXYS_ROOT))
     from deoxys.franka_interface import FrankaInterface  # noqa: PLC0415
     from deoxys.utils.config_utils import get_default_controller_config  # noqa: PLC0415
 
